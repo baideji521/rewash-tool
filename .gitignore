@@ -1,1 +1,46 @@
-/a
+# ===== 大文件（>10MB，不入库）=====
+# 捆绑 FFmpeg 可执行文件（约 129MB×3）：请到 https://www.gyan.dev/ffmpeg/builds/ 下载
+# 解压后放入 ffmpeg/bin/（需含 ffmpeg.exe / ffprobe.exe / ffplay.exe）
+ffmpeg/bin/*.exe
+ffmpeg/bin/*.pdb
+
+# 压缩包 / 备份
+*.rar
+*.zip
+*.7z
+
+# 视频素材与产物
+*.mp4
+*.mkv
+*.avi
+*.mov
+*.flv
+*.wmv
+*.ts
+input_videos/
+output_videos/
+
+# PyInstaller 产物
+dist/
+build/
+*.spec
+
+# Python 缓存
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# 虚拟环境
+venv/
+.venv/
+env/
+
+# IDE / 编辑器
+.idea/
+.vscode/
+
+# 系统文件
+Thumbs.db
+.DS_Store
+desktop.ini

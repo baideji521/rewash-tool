@@ -1,0 +1,84 @@
+{
+    "_说明": "v7.1 三档内置预设（出厂值，可被用户覆盖，覆盖后可恢复出厂）。每档直接定义完整 min/max（不用比例乘法）。对称参数 min/max 表示幅度范围，符号随机。v7.1 档位整体上移：旧标准→新温和，旧激进→新标准，激进重新生成更强参数。rotate 静态旋转已删除（与微旋功能重叠），保留 rotate_drift 动态微旋。",
+    "gentle": {
+        "label": "温和",
+        "description": "范围小画质优先，适合成品二次去重",
+        "params": {
+            "scale":         { "min": 1.02,  "max": 1.06 },
+            "brightness":    { "min": 2.0,   "max": 5.0 },
+            "contrast":      { "min": 2.0,   "max": 5.0 },
+            "saturation":    { "min": 2.0,   "max": 5.0 },
+            "hue":           { "min": 2.0,   "max": 6.0 },
+            "channel_mix":   { "min": 0.015, "max": 0.03 },
+            "speed":         { "min": 0.98,  "max": 1.03 },
+            "frame_dup":     { "min": 1,     "max": 2 },
+            "trim":          { "min": 0.3,   "max": 0.8 },
+            "noise":         { "min": 2.0,   "max": 3.0 },
+            "audio_speed":   { "min": 0.995, "max": 1.005 },
+            "audio_pitch":   { "min": 0.5,   "max": 1.0 },
+            "audio_eq":      { "min": 1.0,   "max": 2.0 },
+            "av_offset":     { "enable": true, "min": 0.05, "max": 0.1 },
+            "crf":           { "min": 20,    "max": 26 },
+            "gop":           { "min": 25,    "max": 55 },
+            "zoom_drift":    { "amp_min": 0.01, "amp_max": 0.04, "period": 4.0 },
+            "rotate_drift":  { "amp_min": 0.5,  "amp_max": 1.0,  "period": 3.0 },
+            "scene_jitter":  { "min": 1,     "max": 2 }
+        }
+    },
+    "standard": {
+        "label": "标准",
+        "description": "默认平衡档（原激进档参数）",
+        "params": {
+            "scale":         { "min": 0.97,  "max": 1.10 },
+            "brightness":    { "min": 3.0,   "max": 8.0 },
+            "contrast":      { "min": 3.0,   "max": 8.0 },
+            "saturation":    { "min": 3.0,   "max": 8.0 },
+            "hue":           { "min": 3.0,   "max": 10.0 },
+            "channel_mix":   { "min": 0.03,  "max": 0.06 },
+            "speed":         { "min": 0.96,  "max": 1.05 },
+            "frame_dup":     { "min": 2,     "max": 3 },
+            "trim":          { "min": 0.5,   "max": 1.5 },
+            "noise":         { "min": 3.0,   "max": 5.0 },
+            "audio_speed":   { "min": 0.99,  "max": 1.01 },
+            "audio_pitch":   { "min": 1.0,   "max": 1.5 },
+            "audio_eq":      { "min": 2.0,   "max": 3.0 },
+            "av_offset":     { "enable": true, "min": 0.1, "max": 0.2 },
+            "crf":           { "min": 18,    "max": 28 },
+            "gop":           { "min": 20,    "max": 60 },
+            "zoom_drift":    { "amp_min": 0.01, "amp_max": 0.07, "period": 3.0 },
+            "rotate_drift":  { "amp_min": 1.0,  "amp_max": 1.5,  "period": 2.0 },
+            "scene_jitter":  { "min": 2,     "max": 3 }
+        }
+    },
+    "aggressive": {
+        "label": "激进",
+        "description": "最强差异档，画质损伤风险较高，输出必须过质检",
+        "params": {
+            "scale":         { "min": 0.94,  "max": 1.14 },
+            "brightness":    { "min": 5.0,   "max": 12.0 },
+            "contrast":      { "min": 5.0,   "max": 12.0 },
+            "saturation":    { "min": 5.0,   "max": 12.0 },
+            "hue":           { "min": 5.0,   "max": 15.0 },
+            "channel_mix":   { "min": 0.04,  "max": 0.08 },
+            "speed":         { "min": 0.94,  "max": 1.07 },
+            "frame_dup":     { "min": 2,     "max": 4 },
+            "trim":          { "min": 0.8,   "max": 2.0 },
+            "noise":         { "min": 4.0,   "max": 7.0 },
+            "audio_speed":   { "min": 0.985, "max": 1.015 },
+            "audio_pitch":   { "min": 1.5,   "max": 2.5 },
+            "audio_eq":      { "min": 2.5,   "max": 4.0 },
+            "av_offset":     { "enable": true, "min": 0.15, "max": 0.25 },
+            "crf":           { "min": 17,    "max": 30 },
+            "gop":           { "min": 15,    "max": 70 },
+            "zoom_drift":    { "amp_min": 0.02, "amp_max": 0.10, "period": 2.5 },
+            "rotate_drift":  { "amp_min": 1.5,  "amp_max": 2.5,  "period": 1.8 },
+            "scene_jitter":  { "min": 3,     "max": 5 }
+        }
+    },
+    "_extra_default": {
+        "_说明": "3.2 可选增强手段默认值（独立开关，默认全关）",
+        "minterpolate": { "enable": false, "target_fps": 60 },
+        "wave_displace": { "enable": false, "amp_px": { "min": 1, "max": 3 }, "period_sec": { "min": 2, "max": 5 } },
+        "region_split":  { "enable": false, "regions": { "min": 2, "max": 4 }, "var_pct": { "min": 2, "max": 5 } }
+    }
+}

@@ -1,0 +1,584 @@
+{
+    "version_count": 1,
+    "segment_count": 6,
+    "output_dir": "C:\\Users\\Administrator\\Desktop\\下载\\新建文件夹",
+    "input_dir": "C:/Users/Administrator/Desktop/下载/Downloads/TikTok",
+    "last_used_preset": "standard",
+    "preset_overrides": {
+        "aggressive": {
+            "scale": {
+                "min": 0.94,
+                "max": 1.14
+            },
+            "brightness": {
+                "min": 5.0,
+                "max": 12.0
+            },
+            "contrast": {
+                "min": 5.0,
+                "max": 12.0
+            },
+            "saturation": {
+                "min": 5.0,
+                "max": 12.0
+            },
+            "hue": {
+                "min": 5.0,
+                "max": 15.0
+            },
+            "channel_mix": {
+                "min": 0.04,
+                "max": 0.08
+            },
+            "speed": {
+                "min": 0.94,
+                "max": 1.07
+            },
+            "frame_dup": {
+                "min": 2.0,
+                "max": 4.0
+            },
+            "trim": {
+                "min": 0.8,
+                "max": 2.0
+            },
+            "noise": {
+                "min": 4.0,
+                "max": 7.0
+            },
+            "audio_speed": {
+                "min": 0.985,
+                "max": 1.015
+            },
+            "audio_pitch": {
+                "min": 1.5,
+                "max": 2.5
+            },
+            "audio_eq": {
+                "min": 2.5,
+                "max": 4.0
+            },
+            "av_offset": {
+                "enable": true,
+                "min": 0.15,
+                "max": 0.25
+            },
+            "crf": {
+                "min": 17.0,
+                "max": 30.0
+            },
+            "gop": {
+                "min": 15.0,
+                "max": 70.0
+            },
+            "zoom_drift": {
+                "amp_min": 0.02,
+                "amp_max": 0.1,
+                "period": 2.5
+            },
+            "rotate_drift": {
+                "amp_min": 1.5,
+                "amp_max": 2.5,
+                "period": 1.8
+            },
+            "scene_jitter": {
+                "min": 3.0,
+                "max": 5.0
+            }
+        },
+        "standard": {
+            "scale": {
+                "min": 0.97,
+                "max": 1.1
+            },
+            "brightness": {
+                "min": 3.0,
+                "max": 8.0
+            },
+            "contrast": {
+                "min": 3.0,
+                "max": 8.0
+            },
+            "saturation": {
+                "min": 3.0,
+                "max": 8.0
+            },
+            "hue": {
+                "min": 3.0,
+                "max": 10.0
+            },
+            "channel_mix": {
+                "min": 0.03,
+                "max": 0.06
+            },
+            "speed": {
+                "min": 0.96,
+                "max": 1.05
+            },
+            "frame_dup": {
+                "min": 2.0,
+                "max": 3.0
+            },
+            "trim": {
+                "min": 0.5,
+                "max": 1.5
+            },
+            "noise": {
+                "min": 3.0,
+                "max": 5.0
+            },
+            "audio_speed": {
+                "min": 0.99,
+                "max": 1.01
+            },
+            "audio_pitch": {
+                "min": 1.0,
+                "max": 1.5
+            },
+            "audio_eq": {
+                "min": 2.0,
+                "max": 3.0
+            },
+            "av_offset": {
+                "enable": true,
+                "min": 0.1,
+                "max": 0.2
+            },
+            "crf": {
+                "min": 18.0,
+                "max": 28.0
+            },
+            "gop": {
+                "min": 20.0,
+                "max": 60.0
+            },
+            "zoom_drift": {
+                "amp_min": 0.01,
+                "amp_max": 0.07,
+                "period": 3.0
+            },
+            "rotate_drift": {
+                "amp_min": 1.0,
+                "amp_max": 1.5,
+                "period": 2.0
+            },
+            "scene_jitter": {
+                "min": 2.0,
+                "max": 3.0
+            }
+        },
+        "gentle": {
+            "scale": {
+                "min": 1.02,
+                "max": 1.06
+            },
+            "brightness": {
+                "min": 2.0,
+                "max": 5.0
+            },
+            "contrast": {
+                "min": 2.0,
+                "max": 5.0
+            },
+            "saturation": {
+                "min": 2.0,
+                "max": 5.0
+            },
+            "hue": {
+                "min": 2.0,
+                "max": 6.0
+            },
+            "channel_mix": {
+                "min": 0.015,
+                "max": 0.03
+            },
+            "speed": {
+                "min": 0.98,
+                "max": 1.03
+            },
+            "frame_dup": {
+                "min": 1.0,
+                "max": 2.0
+            },
+            "trim": {
+                "min": 0.3,
+                "max": 0.8
+            },
+            "noise": {
+                "min": 2.0,
+                "max": 3.0
+            },
+            "audio_speed": {
+                "min": 0.995,
+                "max": 1.005
+            },
+            "audio_pitch": {
+                "min": 0.5,
+                "max": 1.0
+            },
+            "audio_eq": {
+                "min": 1.0,
+                "max": 2.0
+            },
+            "av_offset": {
+                "enable": true,
+                "min": 0.05,
+                "max": 0.1
+            },
+            "crf": {
+                "min": 20.0,
+                "max": 26.0
+            },
+            "gop": {
+                "min": 25.0,
+                "max": 55.0
+            },
+            "zoom_drift": {
+                "amp_min": 0.01,
+                "amp_max": 0.04,
+                "period": 4.0
+            },
+            "rotate_drift": {
+                "amp_min": 0.5,
+                "amp_max": 1.0,
+                "period": 3.0
+            },
+            "scene_jitter": {
+                "min": 1.0,
+                "max": 2.0
+            }
+        }
+    },
+    "switches": {
+        "segment": true,
+        "normalize": true,
+        "quality_check": true
+    },
+    "normalize": {
+        "aspect_ratio": "3:4",
+        "width": 810,
+        "height": 1080,
+        "fps": 30,
+        "pix_fmt": "yuv420p",
+        "video_codec": "h264_nvenc",
+        "audio_codec": "aac",
+        "bitrate_kbps": 0
+    },
+    "encode": {
+        "gpu_auto": true,
+        "nvenc_preset": "p3",
+        "cpu_preset": "medium",
+        "cuda_decode": false,
+        "nvenc": {
+            "enable": true,
+            "preset": "p5",
+            "cq": 23
+        },
+        "cpu": {
+            "enable": true,
+            "preset": "medium",
+            "crf": 23
+        },
+        "profile": "high",
+        "level": "4.1",
+        "pix_fmt": "yuv420p"
+    },
+    "performance": {
+        "workers": {
+            "auto": true,
+            "max": 4
+        },
+        "nvenc_max_sessions": 3,
+        "gpu_scheduler": {
+            "enable": true,
+            "max_gpu_usage": 90,
+            "complexity_threshold": 5
+        }
+    },
+    "fingerprint": {
+        "enable": true,
+        "sample_frames": 10,
+        "max_similarity": 0.7,
+        "retry_max": 3
+    },
+    "retry": {
+        "max_retries": 1
+    },
+    "output": {
+        "aspect_ratio": "3:4"
+    },
+    "video": {
+        "asymmetric_crop": {
+            "enable": true,
+            "min": 0.03,
+            "max": 0.05
+        },
+        "vignette": {
+            "enable": true,
+            "min": 4,
+            "max": 5
+        },
+        "scale": {
+            "enable": true,
+            "min": 1.02,
+            "max": 1.08
+        },
+        "rotate": {
+            "enable": true,
+            "min": 0.2,
+            "max": 0.5
+        },
+        "hue": {
+            "enable": true,
+            "min": -5,
+            "max": 5
+        },
+        "brightness": {
+            "enable": true,
+            "min": 0.02,
+            "max": 0.04
+        },
+        "contrast": {
+            "enable": true,
+            "min": 1.02,
+            "max": 1.05
+        },
+        "saturation": {
+            "enable": true,
+            "min": 0.98,
+            "max": 1.03
+        },
+        "noise": {
+            "enable": true,
+            "min": 2,
+            "max": 3
+        },
+        "film_grain": {
+            "enable": true,
+            "strength": 3,
+            "type": "temporal"
+        },
+        "micro_jitter": {
+            "enable": true,
+            "max_px": 2
+        },
+        "dynamic_drift": {
+            "enable": true,
+            "amplitude_px": 2,
+            "period_sec": {
+                "min": 5,
+                "max": 10
+            }
+        },
+        "lens_distortion": {
+            "enable": true,
+            "k1_range": 0.02,
+            "k2_range": 0.005
+        },
+        "edge_perturbation": {
+            "enable": true,
+            "strength": 3
+        },
+        "rgb_shift": {
+            "enable": true,
+            "max_px": 1
+        },
+        "mask_drift": {
+            "enable": true,
+            "strength": 2
+        },
+        "luminance_wave": {
+            "enable": true,
+            "strength": 2
+        },
+        "reverse_loop": {
+            "enable": true,
+            "probability": 0.4
+        },
+        "frame_drop": {
+            "enable": true,
+            "interval": {
+                "min": 100,
+                "max": 200
+            }
+        },
+        "sharpness": {
+            "enable": true,
+            "min": 0.1,
+            "max": 0.3
+        },
+        "start_trim": {
+            "enable": true,
+            "min": 0.1,
+            "max": 0.5
+        },
+        "black_crop": {
+            "enable": true,
+            "detect": true
+        }
+    },
+    "speed": {
+        "enable": true,
+        "min": 0.985,
+        "max": 1.015,
+        "wave": {
+            "enable": true,
+            "amplitude": 0.03,
+            "period_sec": {
+                "min": 6,
+                "max": 12
+            }
+        }
+    },
+    "audio": {
+        "enable": true,
+        "codec": "aac",
+        "bitrate": "128k",
+        "sample_rate": {
+            "enable": true,
+            "choices": [
+                44100,
+                48000
+            ]
+        },
+        "channels": 2,
+        "volume": {
+            "enable": true,
+            "min": 0.98,
+            "max": 1.02
+        },
+        "pitch": {
+            "enable": true,
+            "min": -1,
+            "max": 1
+        },
+        "noise_floor": {
+            "enable": true,
+            "db": -54
+        },
+        "channel_delay": {
+            "enable": true,
+            "min_ms": 1,
+            "max_ms": 5
+        },
+        "reverb": {
+            "enable": true,
+            "delay_ms": {
+                "min": 15,
+                "max": 40
+            },
+            "decay": {
+                "min": 0.03,
+                "max": 0.08
+            }
+        },
+        "compressor": {
+            "enable": true,
+            "threshold_db": {
+                "min": -18,
+                "max": -12
+            },
+            "ratio": {
+                "min": 2,
+                "max": 4
+            }
+        },
+        "dither": {
+            "enable": true,
+            "strength_db": {
+                "min": -56,
+                "max": -50
+            }
+        }
+    },
+    "advanced": {
+        "bitrate_random": {
+            "enable": true,
+            "min": 1800,
+            "max": 4500
+        },
+        "keyframe_random": {
+            "enable": true,
+            "min": 45,
+            "max": 90
+        },
+        "sei_inject": {
+            "enable": true
+        },
+        "fps_random": {
+            "enable": true,
+            "min": 28,
+            "max": 30
+        },
+        "timestamp_random": false,
+        "faststart": true,
+        "container_randomize": {
+            "enable": true,
+            "padding_bytes": {
+                "min": 64,
+                "max": 512
+            }
+        },
+        "b_frames_random": {
+            "enable": true,
+            "min": 0,
+            "max": 3
+        },
+        "refs_random": {
+            "enable": true,
+            "min": 1,
+            "max": 4
+        },
+        "qp_jitter": {
+            "enable": true,
+            "aq_strength": {
+                "min": 0.6,
+                "max": 1.4
+            }
+        },
+        "double_encode": {
+            "enable": true,
+            "first_crf": 16,
+            "note": "二次编码耗时翻倍，测试全维度时开启，日常使用可关闭提速"
+        }
+    },
+    "metadata": {
+        "clear": true,
+        "remove_chapters": true,
+        "remove_creation_time": true
+    },
+    "segment": {
+        "enable": true,
+        "count": {
+            "min": 2,
+            "max": 4
+        },
+        "crossfade": 0.2,
+        "scene_split": {
+            "enable": true,
+            "threshold": 0.3
+        }
+    },
+    "ai_repaint": {
+        "enable": false,
+        "api_url": "http://127.0.0.1:7860",
+        "model": "sd_xl_base_1.0.safetensors",
+        "controlnet_model": "control_v11f1p_sd15_depth",
+        "denoising_strength": 0.35,
+        "cfg_scale": 7,
+        "steps": 8,
+        "sampler": "Euler a",
+        "prompt": "high quality, detailed, natural lighting",
+        "negative_prompt": "blurry, distorted, low quality",
+        "batch_size": 4,
+        "fps": 30,
+        "process_width": 384,
+        "process_height": 384,
+        "keyframe_interval": 5,
+        "interpolate_method": "copy"
+    },
+    "runtime": {
+        "ffmpeg": "C:\\Users\\Administrator\\Desktop\\video-rewash-tool-main\\ffmpeg\\bin\\ffmpeg.exe",
+        "ffprobe": "C:\\Users\\Administrator\\Desktop\\video-rewash-tool-main\\ffmpeg\\bin\\ffprobe.exe"
+    }
+}
