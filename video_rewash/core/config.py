@@ -43,13 +43,25 @@ DEFAULT_CONFIG = {
     },
     "performance": {
         "workers": {"auto": True, "max": 4},
-        "video_concurrency": 1,  # 视频并发数（任务单位=视频×版本），默认顺序处理，支持 1~16
+        "video_concurrency": 1,  # 视频并发数（任务单位=视频×版本），默认顺序处理，GUI 选项 1~4
         "nvenc_max_sessions": 5,
     },
     "fingerprint": {         # 指纹作为质检工具（不阻断处理）
         "enable": True,
-        "sample_frames": 8,
+        "sample_frames": 10,
         "max_similarity": 0.70,
+        "retry_max": 3,
+    },
+    "video": {               # 配置级视觉扰动开关与范围（GUI 局部项）
+        "asymmetric_crop": {"enable": True, "min": 0.03, "max": 0.05},
+        "lens_distortion": {"enable": True, "k1_range": 0.02, "k2_range": 0.005},
+        "reverse_loop": {"enable": True, "probability": 0.4},
+        "frame_drop": {"enable": True, "interval": {"min": 100, "max": 200}},
+        "black_crop": {"enable": True, "detect": True},
+        # 性能减法项默认关闭：收益/耗时比最差，不在普通 GUI 暴露
+        "noise": {"enable": False, "min": 2, "max": 3},
+        "channel_mix": {"enable": False},
+        "mask_drift": {"enable": False, "strength": 2},
     },
 }
 

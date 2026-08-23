@@ -453,6 +453,139 @@ class MainWindow(QMainWindow):
                     )
                     or 0
                 ),
+
+            # ── 全局项：指纹检测 ──
+            "fp_enable":
+                bool(
+                    config_get(
+                        cfg,
+                        "fingerprint.enable",
+                        True,
+                    )
+                ),
+
+            "fp_threshold":
+                float(
+                    config_get(
+                        cfg,
+                        "fingerprint.max_similarity",
+                        0.70,
+                    )
+                ),
+
+            "fp_frames":
+                int(
+                    config_get(
+                        cfg,
+                        "fingerprint.sample_frames",
+                        10,
+                    )
+                    or 10
+                ),
+
+            "fp_retry":
+                int(
+                    config_get(
+                        cfg,
+                        "fingerprint.retry_max",
+                        3,
+                    )
+                    or 0
+                ),
+
+            # ── 全局项：NVENC 编码档位 ──
+            "nvenc_preset":
+                str(
+                    config_get(
+                        cfg,
+                        "encode.nvenc_preset",
+                        "p3",
+                    )
+                ),
+
+            # ── 配置级视觉扰动（video.* 节点）──
+            "ld_k1":
+                float(
+                    config_get(
+                        cfg,
+                        "video.lens_distortion.k1_range",
+                        0.02,
+                    )
+                ),
+
+            "ld_k2":
+                float(
+                    config_get(
+                        cfg,
+                        "video.lens_distortion.k2_range",
+                        0.005,
+                    )
+                ),
+
+            "ac_min":
+                float(
+                    config_get(
+                        cfg,
+                        "video.asymmetric_crop.min",
+                        0.03,
+                    )
+                ),
+
+            "ac_max":
+                float(
+                    config_get(
+                        cfg,
+                        "video.asymmetric_crop.max",
+                        0.05,
+                    )
+                ),
+
+            "rl_enable":
+                bool(
+                    config_get(
+                        cfg,
+                        "video.reverse_loop.enable",
+                        True,
+                    )
+                ),
+
+            "rl_prob":
+                float(
+                    config_get(
+                        cfg,
+                        "video.reverse_loop.probability",
+                        0.4,
+                    )
+                ),
+
+            "fd_enable":
+                bool(
+                    config_get(
+                        cfg,
+                        "video.frame_drop.enable",
+                        True,
+                    )
+                ),
+
+            "fd_interval_min":
+                int(
+                    config_get(
+                        cfg,
+                        "video.frame_drop.interval.min",
+                        100,
+                    )
+                    or 100
+                ),
+
+            "fd_interval_max":
+                int(
+                    config_get(
+                        cfg,
+                        "video.frame_drop.interval.max",
+                        200,
+                    )
+                    or 200
+                ),
         }
 
         # ----------------------------------------------------
@@ -1270,6 +1403,14 @@ class MainWindow(QMainWindow):
             dlg.get_ui_state()
         )
 
+        ac_lo, ac_hi = (
+            dlg.get_asym_crop_range()
+        )
+
+        self._ui["ac_min"] = ac_lo
+
+        self._ui["ac_max"] = ac_hi
+
         cfg = STORE.get_data()
 
         cfg["version_count"] = (
@@ -1407,6 +1548,68 @@ class MainWindow(QMainWindow):
                     0,
                 ),
         }
+
+        # ----------------------------------------------------
+        # 全局项：指纹检测（fingerprint 节点，合并写入）
+        # ----------------------------------------------------
+
+        fp = cfg.setdefault("fingerprint", {})
+
+        fp["enable"] = bool(u.get("fp_enable", True))
+
+        fp["max_similarity"] = float(
+            u.get("fp_threshold", 0.70)
+        )
+
+        fp["sample_frames"] = int(
+            u.get("fp_frames", 10) or 10
+        )
+
+        fp["retry_max"] = max(
+            0,
+            int(u.get("fp_retry", 3) or 0),
+        )
+
+        # ----------------------------------------------------
+        # 全局项：NVENC 编码档位（encode.nvenc_preset）
+        # ----------------------------------------------------
+
+        cfg.setdefault(
+            "encode",
+            {},
+        )["nvenc_preset"] = str(
+            u.get("nvenc_preset", "p3")
+        )
+
+        # ----------------------------------------------------
+        # 局部项：配置级视觉扰动（video.* 合并写入，
+        # 不影响 noise/mask_drift/black_crop 等其他节点）
+        # ----------------------------------------------------
+
+        vid = cfg.setdefault("video", {})
+
+        ld = vid.setdefault("lens_distortion", {})
+        ld["enable"] = True  # GUI 在调即启用；关闭 = k1/k2 置 0（下游自动跳过）
+        ld["k1_range"] = float(u.get("ld_k1", 0.02))
+        ld["k2_range"] = float(u.get("ld_k2", 0.005))
+
+        ac = vid.setdefault("asymmetric_crop", {})
+        ac["enable"] = True  # 同上；0~0 时采样值全 0，下游自然不裁剪
+        ac["min"] = float(u.get("ac_min", 0.03))
+        ac["max"] = float(u.get("ac_max", 0.05))
+
+        rl = vid.setdefault("reverse_loop", {})
+        rl["enable"] = bool(u.get("rl_enable", True))
+        rl["probability"] = float(u.get("rl_prob", 0.4))
+
+        fd = vid.setdefault("frame_drop", {})
+        fd["enable"] = bool(u.get("fd_enable", True))
+        fd.setdefault("interval", {})["min"] = int(
+            u.get("fd_interval_min", 100) or 100
+        )
+        fd["interval"]["max"] = int(
+            u.get("fd_interval_max", 200) or 200
+        )
 
         STORE.save()
 

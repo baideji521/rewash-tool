@@ -159,10 +159,10 @@ def build_spatial_chain(snap: dict, width: int, height: int,
         filters.append(f"hue=h={hue:.2f}")
 
     cm = float(p.get("channel_mix", 0.0))
-    # 性能减法开关：配置 video.channel_mix.enable 可关闭（默认开）；
+    # 性能减法开关：配置 video.channel_mix.enable 可开启（默认关，不进普通 GUI）；
     # 实测 10s 片段省 1.20s，指纹贡献仅 0.011，收益/耗时比最差之一
     cm_cfg = ((config or {}).get("video") or {}).get("channel_mix") or {}
-    if abs(cm) > 0.001 and cm_cfg.get("enable", True):
+    if abs(cm) > 0.001 and cm_cfg.get("enable", False):
         a = min(0.10, abs(cm)) * (1 if cm > 0 else -1)
         # 通道权重微偏移（行和保持为 1）
         filters.append(
@@ -173,11 +173,11 @@ def build_spatial_chain(snap: dict, width: int, height: int,
         )
 
     # ── 纹理：噪点（唯一噪声手段）──
-    # 性能减法开关：配置 video.noise.enable 可关闭（默认开）；
+    # 性能减法开关：配置 video.noise.enable 可开启（默认关，不进普通 GUI）；
     # 实测 10s 片段省 0.81s，指纹贡献仅 0.009，收益/耗时比最差
     noise = float(p.get("noise", 0.0))
     noise_cfg = ((config or {}).get("video") or {}).get("noise") or {}
-    if noise > 0.1 and noise_cfg.get("enable", True):
+    if noise > 0.1 and noise_cfg.get("enable", False):
         ns = max(1, min(30, int(round(noise * 3))))
         filters.append(f"noise=alls={ns}:allf=t+u")
 
