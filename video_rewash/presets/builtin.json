@@ -19,7 +19,7 @@
             "crf":           { "min": 20,    "max": 26 },
             "gop":           { "min": 25,    "max": 55 },
             "zoom_drift":    { "amp_min": 0.01, "amp_max": 0.04, "period": 4.0 },
-            "rotate_drift":  { "amp_min": 0.4,  "amp_max": 1.8,  "period_min": 6.0, "period_max": 14.0, "speed_min": 0.01, "speed_max": 0.05 }
+            "rotate_drift":  { "amp_min": 0.03, "amp_max": 0.06, "period_min": 10.0, "period_max": 18.0, "speed_min": 0.005, "speed_max": 0.01 }
         }
     },
     "standard": {
@@ -41,7 +41,7 @@
             "crf":           { "min": 19,    "max": 26 },
             "gop":           { "min": 25,    "max": 60 },
             "zoom_drift":    { "amp_min": 0.015, "amp_max": 0.06, "period": 3.5 },
-            "rotate_drift":  { "amp_min": 0.7,  "amp_max": 2.2,  "period_min": 5.0, "period_max": 12.0, "speed_min": 0.015, "speed_max": 0.07 }
+            "rotate_drift":  { "amp_min": 0.05, "amp_max": 0.10, "period_min": 8.0, "period_max": 15.0, "speed_min": 0.01, "speed_max": 0.02 }
         }
     },
     "aggressive": {
@@ -63,7 +63,7 @@
             "crf":           { "min": 18,    "max": 28 },
             "gop":           { "min": 20,    "max": 70 },
             "zoom_drift":    { "amp_min": 0.02, "amp_max": 0.09, "period": 2.5 },
-            "rotate_drift":  { "amp_min": 1.0,  "amp_max": 3.0,  "period_min": 4.0, "period_max": 10.0, "speed_min": 0.025, "speed_max": 0.10 }
+            "rotate_drift":  { "amp_min": 0.08, "amp_max": 0.15, "period_min": 6.0, "period_max": 12.0, "speed_min": 0.015, "speed_max": 0.03 }
         }
     }
 }

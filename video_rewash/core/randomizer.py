@@ -127,26 +127,27 @@ def generate_snapshot(preset: dict, config: dict = None, seed: int = None) -> di
         r_amp = 0.0
     else:
         try:
-            r_amp = rng.uniform(float(rd.get("amp_min", 0.3)), float(rd.get("amp_max", 0.8)))
+            r_amp = rng.uniform(float(rd.get("amp_min", 0.05)), float(rd.get("amp_max", 0.10)))
         except (TypeError, ValueError):
-            r_amp = rng.uniform(0.3, 0.8)
+            r_amp = rng.uniform(0.05, 0.10)
     p["rotate_drift_amp"] = round(r_amp, 3)
     if _zero_pair(rd.get("period_min"), rd.get("period_max")):
-        r_per = 8.0
+        r_per = 10.0
     else:
         try:
-            r_per = rng.uniform(float(rd.get("period_min", 3.0)), float(rd.get("period_max", 6.0)))
+            r_per = rng.uniform(float(rd.get("period_min", 8.0)), float(rd.get("period_max", 15.0)))
         except (TypeError, ValueError):
-            r_per = rng.uniform(3.0, 6.0)
+            r_per = rng.uniform(8.0, 15.0)
     p["rotate_drift_period"] = round(r_per, 2)
-    # 微旋速度：单向恒速漂移（°/s），符号随机 → 左旋或右旋；0~0 → 关闭漂移
+    # 微旋速度：单向恒速漂移（°/s，累计角度 = speed×t，必须极小），
+    # 符号随机 → 左旋或右旋；0~0 → 关闭漂移；取值严格落在配置区间内
     if _zero_pair(rd.get("speed_min"), rd.get("speed_max")):
         r_spd = 0.0
     else:
         try:
-            r_spd = rng.uniform(float(rd.get("speed_min", 0.02)), float(rd.get("speed_max", 0.08)))
+            r_spd = rng.uniform(float(rd.get("speed_min", 0.01)), float(rd.get("speed_max", 0.02)))
         except (TypeError, ValueError):
-            r_spd = rng.uniform(0.02, 0.08)
+            r_spd = rng.uniform(0.01, 0.02)
         r_spd = r_spd if rng.random() < 0.5 else -r_spd
     p["rotate_drift_speed"] = round(r_spd, 4)
     # 随机初始相位（0~2π）→ 每段正弦波起点不同，避免分段同角度起步
@@ -367,10 +368,11 @@ def plan_lens_events(snap: dict, config: dict, timeline_len: float,
 
 
 def generate_segment_plan(snap: dict, config: dict, seg_idx: int,
-                          seg_len: float) -> dict:
+                          seg_len: float, log_fn=None) -> dict:
     """单段动态/事件规划（B/C 层）。时间均为段内局部坐标（0 起）。
     seg_len: 该段在目标时间轴上的长度（变速后空间，与滤镜位置一致）。
     规则：probability<=0 或 duration 0~0 → 关闭；窗口放不下时收缩/放弃。
+    log_fn 非空时输出微旋参数日志（便于核对单位）。
     返回 {"rotate":..,"zoom":..,"frame_drop":..,"reverse_loop":..}。"""
     seed = int(snap.get("seed", 0)) + seg_idx * 104729
     rng = random.Random(seed)
@@ -416,12 +418,21 @@ def generate_segment_plan(snap: dict, config: dict, seg_idx: int,
         return {"on": True, "start": round(start, 3), "dur": round(dur, 3)}
 
     # 微旋窗口（幅度/速度已在快照中逐段随机；窗口只在段内部分时间生效）
-    r_active = (float(p.get("rotate_drift_amp", 0.0)) > 0.05
-                or abs(float(p.get("rotate_drift_speed", 0.0))) > 0.005)
+    # 阈值与新参数区间（amp 0.03~0.15° / speed 0.005~0.03°/s）对齐，
+    # 仅区分 0~0 关闭与启用，不再拦截合法小值
+    r_active = (float(p.get("rotate_drift_amp", 0.0)) > 0.001
+                or abs(float(p.get("rotate_drift_speed", 0.0))) > 0.0005)
     if r_active:
         w = _window(vcfg.get("rotate_drift"), 0.8, 3.0, 8.0)
         if w:
             plan["rotate"] = w
+            if log_fn:
+                rw = plan["rotate"]
+                log_fn(f"微旋参数: 幅度={float(p.get('rotate_drift_amp', 0.0)):.3f}° "
+                       f"周期={float(p.get('rotate_drift_period', 0.0)):.2f}s "
+                       f"漂移速度={float(p.get('rotate_drift_speed', 0.0)):+.4f}°/s "
+                       f"窗口={rw['start']:.2f}~{rw['start'] + rw['dur']:.2f}s"
+                       f"(时长{rw['dur']:.2f}s)")
 
     # 推镜窗口（含前后留白 pause）
     if float(p.get("zoom_drift_amp", 0.0)) > 0.002:

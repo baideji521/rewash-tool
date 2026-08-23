@@ -125,7 +125,8 @@ def process_single_pass(input_path, output_path, base_snap, config,
         av = float(p.get("av_offset", 0.0) or 0.0)
         t0 = max(0.0, seg_start - av)
         t1 = max(t0 + 0.05, seg_end - av)
-        plan = generate_segment_plan(snap, config, i, seg_len / speed)
+        plan = generate_segment_plan(snap, config, i, seg_len / speed,
+                                     log_fn=log_fn)
         exp_dur += rl_extra_seconds(plan, speed)
 
         sfx = f"_{i}"

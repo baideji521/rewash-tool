@@ -30,6 +30,7 @@ from PyQt5.QtWidgets import (
     QProgressBar,
     QPlainTextEdit,
     QMessageBox,
+    QMenu,
 )
 
 try:
@@ -624,8 +625,12 @@ class MainWindow(QMainWindow):
                 last_used
             )
         )
-        # 注：预设参数完全由 get_preset() 从预设文件（builtin/custom）加载；
-        # 设置对话框的参数微调仅在当前会话生效，永久保存请用「保存为自定义」。
+        # “确定”后的微调值按预设名保存到 config.json。自定义预设本身仍以
+        # presets/custom.json 为准；这里用于保留对内置预设和临时微调的修改。
+        saved_tweaks = config_get(cfg, "preset_tweaks", {}) or {}
+        saved_params = saved_tweaks.get(last_used)
+        if isinstance(saved_params, dict):
+            self._preset_snap["params"] = copy.deepcopy(saved_params)
 
         # ----------------------------------------------------
         # 构建界面
@@ -1085,6 +1090,14 @@ class MainWindow(QMainWindow):
             2000
         )
 
+        self.log_box.setContextMenuPolicy(
+            Qt.CustomContextMenu
+        )
+
+        self.log_box.customContextMenuRequested.connect(
+            self._log_context_menu
+        )
+
         root.addWidget(
             self.log_box,
             1,
@@ -1488,6 +1501,14 @@ class MainWindow(QMainWindow):
             self._preset_snap["params"] = (
                 dlg.get_params()
             )
+
+            # 不要只留在内存：否则重启或重新打开设置会回到预设原值，
+            # 与界面提示“参数已保存”不一致。
+            tweaks = cfg.get("preset_tweaks")
+            if not isinstance(tweaks, dict):
+                tweaks = {}
+                cfg["preset_tweaks"] = tweaks
+            tweaks[key] = copy.deepcopy(self._preset_snap["params"])
 
             self._log(
                 f"参数已保存"
@@ -2151,6 +2172,34 @@ class MainWindow(QMainWindow):
         self.log_box.appendPlainText(
             f"[{time.strftime('%H:%M:%S')}] {msg}"
         )
+
+    def _log_context_menu(self, pos):
+        """日志右键菜单：全选/复制/粘贴/删除/清空（日志只读，粘贴不可用）"""
+        menu = QMenu(self)
+        act_all = menu.addAction("全选")
+        act_copy = menu.addAction("复制")
+        act_paste = menu.addAction("粘贴")
+        act_del = menu.addAction("删除")
+        act_clear = menu.addAction("清空")
+        has_sel = self.log_box.textCursor().hasSelection()
+        has_text = bool(self.log_box.toPlainText())
+        act_all.setEnabled(has_text)
+        act_copy.setEnabled(has_sel)
+        act_paste.setEnabled(False)  # 日志区只读，不允许粘贴写入
+        act_del.setEnabled(has_sel)
+        act_clear.setEnabled(has_text)
+        chosen = menu.exec_(self.log_box.mapToGlobal(pos))
+        if chosen is None:
+            return
+        if chosen is act_all:
+            self.log_box.selectAll()
+        elif chosen is act_copy:
+            self.log_box.copy()
+        elif chosen is act_del:
+            cur = self.log_box.textCursor()
+            cur.removeSelectedText()
+        elif chosen is act_clear:
+            self.log_box.clear()
 
     # ========================================================
     # 关闭窗口

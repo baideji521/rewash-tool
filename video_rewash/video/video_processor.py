@@ -240,7 +240,8 @@ def process_clip(input_path, output_path, snap, config, media_info,
                                                   - float(snap.get("params", {}).get("trim_tail", 0.0)))
     speed = max(0.1, float(snap.get("params", {}).get("speed", 1.0)))
     expect_dur = seg_dur / speed
-    plan = generate_segment_plan(snap, config, seg_idx, expect_dur)
+    plan = generate_segment_plan(snap, config, seg_idx, expect_dur,
+                                 log_fn=log_fn)
     if seg_idx == 0 and snap.get("params", {}).get("rl_mode"):
         plan["reverse_loop"] = {"mode": None}
     expect_dur += rl_extra_seconds(plan, speed)

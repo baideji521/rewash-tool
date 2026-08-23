@@ -60,3 +60,7 @@ logs/
 /_*.txt
 /_*.ps1
 /_perf_out/
+
+# 上传脚本（本机工具，不随项目上传）
+/upload_github.ps1
+/一键上传github.bat

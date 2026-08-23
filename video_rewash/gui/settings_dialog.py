@@ -2,6 +2,7 @@
 """gui.settings_dialog — 设置对话框（v7.2 参数分类重整）
 
 页1 去重参数：
+    预设方案（温和/标准/激进 + 自定义预设切换，选择后加载对应参数）
     局部项 · 视觉扰动（影响单个视频片段的画面变化）：微旋/推镜/
     镜头畸变/非对称裁剪/亮度/对比度/饱和度/色相/倒放循环/周期抽帧
     其他扰动参数（时序/音频/编码）：缩放/裁剪/变速/重复帧/音频微调/
@@ -12,7 +13,8 @@
     NVENC 编码档位/质量检测 + 输出标准化开关与规格（比例/分辨率/
     帧率/编码/码率）
 
-页3 预设管理：预设选择 + 重命名 / 删除 / 导出为 JSON / 从 JSON 导入
+页3 预设管理：自定义预设的重命名 / 删除 / 导出为 JSON / 从 JSON 导入
+（预设选择在「去重参数」页顶部）
 
 按钮语义：
 - 确定：预设 + 全部设置应用到主界面（预设参数为临时微调）
@@ -136,9 +138,30 @@ class SettingsDialog(QDialog):
         root.addLayout(btns)
 
     def _build_tab_params(self) -> QWidget:
-        """去重参数页：仅扰动参数（预设切换在「预设管理」页）"""
+        """去重参数页：预设方案选择 + 扰动参数"""
         tab = QWidget()
         outer = QVBoxLayout(tab)
+
+        # 预设方案（选择后加载 builtin.json / custom.json 对应参数，
+        # 只修改当前去重参数，不改变处理逻辑）
+        pbox = QGroupBox("预设方案")
+        pl = QHBoxLayout(pbox)
+        pl.addWidget(QLabel("当前预设:"))
+        self.preset_combo = QComboBox()
+        for key, label, builtin in preset_mod.list_presets():
+            mark = "📌 " if builtin else "👤 "
+            self.preset_combo.addItem(f"{mark}{label}", key)
+        cur = self._preset.get("name", "standard")
+        for i in range(self.preset_combo.count()):
+            if self.preset_combo.itemData(i) == cur:
+                self.preset_combo.setCurrentIndex(i)
+                break
+        self.preset_combo.currentIndexChanged.connect(self._on_preset_switch)
+        pl.addWidget(self.preset_combo, 1)
+        ptip = QLabel("(选择预设即加载对应参数，仅影响当前去重参数)")
+        ptip.setStyleSheet("color:#888;font-size:11px")
+        pl.addWidget(ptip)
+        outer.addWidget(pbox)
 
         # 参数区（可滚动）
         scroll = QScrollArea()
@@ -256,14 +279,15 @@ class SettingsDialog(QDialog):
             row += 1
 
         # 微旋（正弦摆动 + 单向恒速漂移）：幅度/速度/周期 均为 0~0 → 对应分量关闭
+        # amp=° / period=s / speed=°/s（累计漂移，取值极小）
         rd_node = params.get("rotate_drift") or {}
         if isinstance(rd_node, dict):
             _range_row("微旋幅度(°) ±", "rotate_drift", None,
-                       rd_node.get("amp_min", 0.3), rd_node.get("amp_max", 0.8))
+                       rd_node.get("amp_min", 0.05), rd_node.get("amp_max", 0.10))
             _range_row("微旋速度(°/s) ±", "rotate_drift_speed", None,
-                       rd_node.get("speed_min", 0.02), rd_node.get("speed_max", 0.08))
+                       rd_node.get("speed_min", 0.01), rd_node.get("speed_max", 0.02))
             _range_row("微旋周期(s)", "rotate_drift_period", None,
-                       rd_node.get("period_min", 3.0), rd_node.get("period_max", 6.0))
+                       rd_node.get("period_min", 8.0), rd_node.get("period_max", 15.0))
         # 微旋事件窗口（分段级：概率 + 窗口时长；时长 0~0 → 关闭窗口化）
         self._rdw_prob, self._rdw_lo, self._rdw_hi = self._event_row(
             grid, row, "微旋窗口(概率/时长s)", u, "rdw", 0.8, 3.0, 8.0)
@@ -501,27 +525,11 @@ class SettingsDialog(QDialog):
         return tab
 
     def _build_tab_manage(self) -> QWidget:
-        """预设管理：预设选择 + 重命名/删除/导出/导入"""
+        """预设管理：自定义预设重命名/删除/导出/导入（预设选择在去重参数页）"""
         tab = QWidget()
         lay = QVBoxLayout(tab)
 
-        # 预设选择（切换后去重参数页的范围随之刷新）
-        pl = QHBoxLayout()
-        pl.addWidget(QLabel("当前预设:"))
-        self.preset_combo = QComboBox()
-        for key, label, builtin in preset_mod.list_presets():
-            mark = "📌 " if builtin else "👤 "
-            self.preset_combo.addItem(f"{mark}{label}", key)
-        cur = self._preset.get("name", "standard")
-        for i in range(self.preset_combo.count()):
-            if self.preset_combo.itemData(i) == cur:
-                self.preset_combo.setCurrentIndex(i)
-                break
-        self.preset_combo.currentIndexChanged.connect(self._on_preset_switch)
-        pl.addWidget(self.preset_combo, 1)
-        lay.addLayout(pl)
-
-        tip = QLabel("切换预设后去重参数页的范围随之刷新；选中列表项可重命名/删除/导出，也可导入 JSON 预设")
+        tip = QLabel("预设选择已移至「去重参数」页顶部；选中列表项可重命名/删除/导出，也可导入 JSON 预设")
         tip.setStyleSheet("color:#888;font-size:11px")
         lay.addWidget(tip)
         self.mgr_list = QListWidget()

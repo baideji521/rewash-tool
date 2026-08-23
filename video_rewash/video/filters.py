@@ -202,16 +202,24 @@ def build_zoom_window_complex(src_label: str, zwin: dict, p: dict,
 
 def build_rotate_filter(p: dict, enable_expr: str = None) -> str:
     """动态微旋（正弦角度渐变 + 单向恒速漂移）。
-    enable_expr 非空时仅窗口内生效（rotate 支持 timeline，窗口外零开销）。
-    窗口内时间基准由调用方保证（先 setpts 归零再进窗口）。未启用返回空串。"""
+    单位：amp=最大摆角（°），period=正弦周期（s），speed=单向漂移（°/s，
+    累计角度=speed×t，取值必须极小），phase=初相位（rad）。
+    FFmpeg rotate 角度为弧度，故各项均乘 π/180 换算；公式不再做任何
+    单位变换。enable_expr 非空时仅窗口内生效（rotate 支持 timeline，
+    窗口外零开销）。窗口内时间基准由调用方保证（先 setpts 归零再进窗口）。
+    未启用返回空串。"""
     r_amp = float(p.get("rotate_drift_amp", 0.0))
-    r_period = max(1.0, float(p.get("rotate_drift_period", 8.0)))
+    r_period = max(1.0, float(p.get("rotate_drift_period", 10.0)))
     r_speed = float(p.get("rotate_drift_speed", 0.0))
     r_phase = float(p.get("rotate_drift_phase", 0.0))
-    if not (r_amp > 0.05 or abs(r_speed) > 0.005):
+    # 启用阈值只区分 0~0 关闭与启用，不拦截新区间内的合法小值（amp≥0.03°）
+    if not (r_amp > 0.001 or abs(r_speed) > 0.0005):
         return ""
-    sin_part = f"{r_amp:.3f}*{math.pi / 180:.6f}*sin(2*PI*t/{r_period:.2f}+{r_phase:.4f})" if r_amp > 0.05 else "0"
-    spd_part = f"+{r_speed:.4f}*{math.pi / 180:.6f}*t" if abs(r_speed) > 0.005 else ""
+    deg2rad = math.pi / 180
+    sin_part = (f"{r_amp:.4f}*{deg2rad:.6f}*sin(2*PI*t/{r_period:.2f}+{r_phase:.4f})"
+                if r_amp > 0.001 else "0")
+    # {:+.4f} 自动携带符号，负速度生成 "-0.0140" 而非 "+-0.0140"
+    spd_part = f"{r_speed:+.4f}*{deg2rad:.6f}*t" if abs(r_speed) > 0.0005 else ""
     angle_expr = f"({sin_part}{spd_part})"
     f = f"rotate={angle_expr}:fillcolor=none"
     if enable_expr:
