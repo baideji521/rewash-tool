@@ -36,16 +36,24 @@ class GPUScheduler:
         max_sessions = int(config_get(cfg, "performance.nvenc_max_sessions", 3))
         self.nvenc_semaphore = threading.Semaphore(max(1, max_sessions))
 
-        # 并发数：auto 按 CPU 核数，但不超过显式上限
-        workers_cfg = config_get(cfg, "performance.workers", {}) or {}
-        if workers_cfg.get("auto", True):
-            cpu = os.cpu_count() or 4
-            self.max_workers = max(1, min(4, cpu // 2))
+        # 并发数：由「视频并发数」设置决定（默认 1 顺序处理，支持 1~16）；
+        # 任务单位 = 视频×版本（1 视频 5 版本 = 5 个并行任务）。
+        # 旧配置 performance.workers 仅作兼容回退。
+        vc = config_get(cfg, "performance.video_concurrency", None)
+        if vc is not None:
+            try:
+                self.max_workers = max(1, min(16, int(vc)))
+            except (TypeError, ValueError):
+                self.max_workers = 1
         else:
-            self.max_workers = max(1, int(workers_cfg.get("max", 2)))
-        # GPU 编码时并发受 NVENC 会话数约束
-        if self.use_nvenc:
-            self.max_workers = min(self.max_workers, max_sessions + 1)
+            workers_cfg = config_get(cfg, "performance.workers", {}) or {}
+            if workers_cfg.get("auto", True):
+                cpu = os.cpu_count() or 4
+                self.max_workers = max(1, min(4, cpu // 2))
+            else:
+                self.max_workers = max(1, int(workers_cfg.get("max", 2)))
+        # 注：GPU 编码会话数由 nvenc_semaphore 信号量保护（超限任务排队），
+        # 不再反向压缩并发数，保证用户设置生效
 
     def summary(self) -> str:
         return (f"GPU={self.gpu_name} NVENC={'可用' if self.use_nvenc else '不可用'} "

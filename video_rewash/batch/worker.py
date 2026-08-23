@@ -14,10 +14,10 @@ from pathlib import Path
 
 from ..core.processor import process_one
 from ..core.config import config_get
-from ..core.ffmpeg_runner import STOP_EVENT
+from ..core.ffmpeg_runner import STOP_EVENT  # noqa: F401 (re-exported)
 from .scheduler import GPUScheduler
 from .checkpoint import Checkpoint
-from .retry import run_with_retry
+# retry 已移入 process_one() 内部（指纹重试）
 
 _LOG_DIR = Path(__file__).resolve().parent.parent.parent / "logs"
 
@@ -96,92 +96,134 @@ class BatchRunner:
         total = len(pending)
         done_cnt, fail_cnt = 0, 0
         elapsed_list = []
-        max_retries = int(config_get(self.config, "retry.max_retries", 1))
         version_count = max(1, int(config_get(self.config, "version_count", 1) or 1))
 
-        def task_one(input_path: str):
-            nonlocal done_cnt, fail_cnt
+        # 任务单位 = (视频, 版本)：并发数 N 即最多 N 个（视频/版本）任务同时跑；
+        # 1 视频×1 版本=1 任务（顺序），1 视频×5 版本=5 任务，5 视频×1 版本=5 任务；
+        # 任务总数低于并发数时按任务数开线程。
+        tasks = [(p, v) for p in pending for v in range(1, version_count + 1)]
+        # 按视频聚合：一个视频的全部版本结束后才计 1 个完成（检查点/进度按视频粒度）
+        ver_left = {p: version_count for p in pending}
+        ver_ok_cnt = {p: 0 for p in pending}
+        last_out = {}
+        last_reason = {}
+
+        def task_one(input_path: str, ver: int):
             if STOP_EVENT.is_set():
-                return input_path, False, "stopped"
+                return input_path, ver, False, {"issues": ["stopped"]}
             acquired = self.scheduler.acquire_gpu()
             try:
-                ver_ok = 0
-                last_res = None
-                for v in range(1, version_count + 1):
-                    if STOP_EVENT.is_set():
-                        break
-                    stamp = time.strftime("%Y%m%d_%H%M%S")
-                    out_path = self._alloc_output(input_path, output_dir,
-                                                  v, version_count, stamp)
-                    if version_count > 1:
-                        self.logger.write(f"生成版本 {v}/{version_count}",
-                                          os.path.basename(input_path))
+                stamp = time.strftime("%Y%m%d_%H%M%S")
+                out_path = self._alloc_output(input_path, output_dir,
+                                              ver, version_count, stamp)
+                if version_count > 1:
+                    self.logger.write(f"生成版本 {ver}/{version_count}",
+                                      os.path.basename(input_path))
 
-                    def attempt(att):
-                        res = process_one(
-                            input_path, out_path, self.preset, self.config,
-                            use_nvenc=self.scheduler.use_nvenc,
-                            log_fn=lambda m: self.logger.write(m, os.path.basename(input_path)),
-                            progress_cb=lambda stage, frac: self.file_progress_cb(input_path, frac))
-                        return res["success"], res
-                    ok, res, attempts = run_with_retry(
-                        attempt, max_retries=max_retries,
-                        log_fn=lambda m: self.logger.write(m, os.path.basename(input_path)),
-                        label=os.path.basename(input_path))
-                    last_res = res
-                    if ok:
-                        ver_ok += 1
-                        self.checkpoint.mark_done(input_path, out_path, res.get("elapsed", 0))
+                # process_one 内部已包含指纹重试逻辑（单视频流程不变：
+                # 每次重试重新生成随机参数，最多 4 次）
+                res = process_one(
+                    input_path, out_path, self.preset, self.config,
+                    use_nvenc=self.scheduler.use_nvenc,
+                    log_fn=lambda m: self.logger.write(
+                        m, os.path.basename(input_path)),
+                    progress_cb=lambda stage, frac:
+                        self.file_progress_cb(input_path, frac))
+                ok = res.get("success", False)
+                fp_pass = res.get("fp_pass", True)
+                attempts = res.get("fp_attempts", 1)
+                if ok:
+                    # 文件已生成即计入完成（指纹未达标仅警告，保留文件）
+                    if not fp_pass:
+                        issues = [i for i in (res.get("issues") or [])
+                                  if "指纹相似度" not in i and "超过阈值" not in i
+                                  and "最大重试次数" not in i]
+                        sim = res.get("fingerprint_sim")
+                        extra = f" 指纹={sim:.3f}" if sim is not None else ""
+                        if issues:
+                            extra += " ⚠ " + ";".join(issues)
+                        tag = "⚠ 完成（指纹未达标）"
+                    else:
                         issues = res.get("issues") or []
                         sim = res.get("fingerprint_sim")
                         extra = f" 指纹={sim:.3f}" if sim is not None else ""
-                        extra += (" ⚠" + ";".join(issues)) if issues else ""
-                        self.logger.write(
-                            f"✓ 完成 耗时{res.get('elapsed')}s 重试{attempts - 1}次{extra}",
-                            os.path.basename(input_path))
-                        elapsed_list.append(res.get("elapsed", 30.0))
-                    else:
-                        reason = "; ".join(res.get("issues", [])) if isinstance(res, dict) else str(res)
-                        self.logger.write(f"✗ 版本{v}失败: {reason[:200]}",
-                                          os.path.basename(input_path))
-                ok = ver_ok == version_count and ver_ok > 0
-                res = last_res if isinstance(last_res, dict) else {"issues": [str(last_res)]}
+                        extra += (" ⚠ " + ";".join(issues)) if issues else ""
+                        tag = "✓ 完成"
+                    enc_t = res.get('encode_time')
+                    fp_t = res.get('fp_time')
+                    timing = ""
+                    if enc_t is not None:
+                        timing += f" 编码={enc_t}s"
+                    if fp_t is not None:
+                        timing += f" 指纹={fp_t}s"
+                    self.logger.write(
+                        f"{tag} 耗时{res.get('elapsed')}s"
+                        f" 重试{attempts - 1}次{timing}{extra}",
+                        os.path.basename(input_path))
+                    elapsed_list.append(res.get("elapsed", 30.0))
+                else:
+                    reason = "; ".join(res.get("issues", [])) if isinstance(res, dict) else str(res)
+                    self.logger.write(f"✗ 版本{ver}失败: {reason[:200]}",
+                                      os.path.basename(input_path))
+                return input_path, ver, ok, res
             finally:
                 self.scheduler.release_gpu(acquired)
 
-            with self._lock:
-                if ok:
-                    done_cnt += 1
-                    self.file_progress_cb(input_path, 1.0)
-                else:
-                    fail_cnt += 1
-                    reason = "; ".join(res.get("issues", [])) if isinstance(res, dict) else str(res)
-                    self.checkpoint.mark_failed(input_path, reason or "未知错误")
-                    self.logger.write(f"✗ 失败: {reason[:200]}", os.path.basename(input_path))
-
-                # 实时 ETA：已完成平均耗时 × 剩余 / 并发
-                finished = done_cnt + fail_cnt
-                remaining = total - finished
-                avg = sum(elapsed_list) / len(elapsed_list) if elapsed_list else 60.0
-                workers = max(1, self.scheduler.max_workers)
-                eta = avg * remaining / workers * max(1, version_count)
-                self.progress_cb(finished, total, eta, os.path.basename(input_path))
-            return input_path, ok, ""
-
-        workers = max(1, min(self.scheduler.max_workers, total))
+        workers = max(1, min(self.scheduler.max_workers, len(tasks)))
+        self.logger.write(f"并发={workers}（任务数={len(tasks)}："
+                          f"{total} 视频 × {version_count} 版本）")
         with ThreadPoolExecutor(max_workers=workers) as pool:
-            futures = {pool.submit(task_one, p): p for p in pending}
+            futures = {pool.submit(task_one, p, v): (p, v) for p, v in tasks}
             for fut in as_completed(futures):
-                path = futures[fut]
+                path, ver = futures[fut]
                 try:
-                    _, ok, _info = fut.result()
-                    self.results.append((path, ok))
+                    input_path, _v, ok, res = fut.result()
                 except Exception as e:
-                    with self._lock:
-                        fail_cnt += 1
-                    self.checkpoint.mark_failed(path, str(e))
+                    ok, res = False, {"issues": [str(e)]}
                     self.logger.write(f"✗ 异常: {e}", os.path.basename(path))
-                    self.results.append((path, False))
+
+                with self._lock:
+                    if ok:
+                        ver_ok_cnt[path] += 1
+                    else:
+                        reason = "; ".join(res.get("issues", [])) if isinstance(res, dict) else str(res)
+                        last_reason[path] = reason or "未知错误"
+                    # 记录该视频最新成功输出（用于检查点）
+                    if ok and isinstance(res, dict) and res.get("output"):
+                        last_out[path] = res.get("output")
+                    ver_left[path] -= 1
+                    if ver_left[path] == 0:
+                        # 该视频全部版本结束 → 视频粒度结算
+                        if ver_ok_cnt[path] == version_count and ver_ok_cnt[path] > 0:
+                            done_cnt += 1
+                            self.checkpoint.mark_done(
+                                path, last_out.get(path, ""),
+                                sum(elapsed_list[-version_count:])
+                                / max(1, len(elapsed_list[-version_count:])))
+                            self.file_progress_cb(path, 1.0)
+                        else:
+                            fail_cnt += 1
+                            # 指纹未达标但文件已生成：不重复输出“✗ 失败”
+                            if ver_ok_cnt[path] == 0:
+                                self.checkpoint.mark_failed(
+                                    path, last_reason.get(path, "未知错误"))
+                                self.logger.write(
+                                    f"✗ 失败: {last_reason.get(path, '未知错误')[:200]}",
+                                    os.path.basename(path))
+                            else:
+                                self.checkpoint.mark_done(
+                                    path, last_out.get(path, ""), 0)
+                        self.results.append(
+                            (path, ver_ok_cnt[path] == version_count
+                             and ver_ok_cnt[path] > 0))
+
+                        # 实时 ETA：已完成平均耗时 × 剩余任务 / 并发（视频粒度）
+                        finished = done_cnt + fail_cnt
+                        remaining_versions = sum(ver_left.values())
+                        avg = sum(elapsed_list) / len(elapsed_list) if elapsed_list else 60.0
+                        eta = avg * remaining_versions / max(1, workers)
+                        self.progress_cb(finished, total, eta,
+                                         os.path.basename(path))
                 if STOP_EVENT.is_set():
                     self.logger.write("⏹ 收到停止信号，等待运行中任务终止…")
 

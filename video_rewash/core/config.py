@@ -22,10 +22,8 @@ DEFAULT_CONFIG = {
     "output_dir": "",          # 记住上次输出目录
     "input_dir": "",           # 记住上次输入目录
     "last_used_preset": "standard",
-    "preset_overrides": {},  # 去重页参数微调的全局覆盖（按预设名存，启动自动还原）
     "switches": {            # 3.1 流程类独立开关（与档位无关）
-        "segment": True,     # 兼容旧配置（v7.1 以 segment_count 为准）
-        "normalize": True,   # 输出标准化
+        "normalize": True,   # 输出标准化（分段数由 segment_count 直接控制）
         "quality_check": True,  # 输出质量检测
     },
     "normalize": {           # 3.3 输出标准化可配置项
@@ -45,15 +43,13 @@ DEFAULT_CONFIG = {
     },
     "performance": {
         "workers": {"auto": True, "max": 4},
-        "nvenc_max_sessions": 3,
+        "video_concurrency": 1,  # 视频并发数（任务单位=视频×版本），默认顺序处理，支持 1~16
+        "nvenc_max_sessions": 5,
     },
     "fingerprint": {         # 指纹作为质检工具（不阻断处理）
         "enable": True,
         "sample_frames": 8,
         "max_similarity": 0.70,
-    },
-    "retry": {               # 工程化：失败重试
-        "max_retries": 1,
     },
 }
 

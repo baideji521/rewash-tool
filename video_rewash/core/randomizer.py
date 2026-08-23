@@ -10,6 +10,7 @@
 - 音频速度 = 视频速度 × 微偏因子，保证音画同步不漂移（观感安全）。
 - 快照记录全部具体值，处理日志首行输出，便于追溯与复现（seed）。
 """
+import math
 import random
 import time
 
@@ -33,6 +34,24 @@ def _signed(rng: random.Random, lo: float, hi: float) -> float:
     """幅度范围 + 随机符号"""
     mag = rng.uniform(lo, hi)
     return mag if rng.random() < 0.5 else -mag
+
+
+def _zero_pair(a, b) -> bool:
+    """统一规则：min = max = 0 → 功能自动关闭。
+    必须严格用 == 0 判断（不能用 if not a 之类假值判断），
+    否则 0~5 / -5~0 会被误判为关闭。"""
+    try:
+        return float(a) == 0.0 and float(b) == 0.0
+    except (TypeError, ValueError):
+        return False
+
+
+def _zero_range(preset: dict, key: str) -> bool:
+    """预设节点 {min, max} 为 0~0 → 该功能自动关闭"""
+    node = (preset.get("params", {}) or {}).get(key)
+    if isinstance(node, dict):
+        return _zero_pair(node.get("min"), node.get("max"))
+    return False
 
 
 # 高低通按档位的采样范围（方案 2.2 表）
@@ -64,27 +83,114 @@ def generate_snapshot(preset: dict, config: dict = None, seed: int = None) -> di
     # ── 几何 ──
     # v7.1：静态 rotate 已删除（与 rotate_drift 动态微旋功能重叠），仅保留动态微旋
     lo, hi = _range_of(preset, "scale", 1.01, 1.04)
-    p["scale"] = round(rng.uniform(lo, hi), 4)
+    # 0~0 → 关闭缩放扰动（恒等值 1.0；0 不是合法缩放，必须显式拦截）
+    p["scale"] = 1.0 if _zero_range(preset, "scale") else round(rng.uniform(lo, hi), 4)
     lo, hi = _range_of(preset, "trim", 0.2, 0.6)
     p["trim_head"] = round(rng.uniform(lo, hi), 3)
     p["trim_tail"] = round(rng.uniform(lo, hi), 3)
-    # 镜头微运动（推镜渐变）
+    # 镜头微运动（推镜渐变）；配置 video.zoom_drift.enable 可关闭（默认开）
     zd = params.get("zoom_drift") or {}
-    try:
-        z_amp = rng.uniform(float(zd.get("amp_min", 0.01)), float(zd.get("amp_max", 0.03)))
-    except (TypeError, ValueError):
-        z_amp = rng.uniform(0.01, 0.03)
-    p["zoom_drift_amp"] = round(z_amp, 4)
-    p["zoom_drift_period"] = float(zd.get("period", 4.0) or 4.0)
-    p["zoom_drift_dir"] = rng.choice(["in", "out"])
-    # 动态微旋（正弦渐变）
+    zd_cfg = (config.get("video") or {}).get("zoom_drift") or {}
+    if zd_cfg.get("enable", True):
+        # 统一规则：推镜幅度 0~0 → 关闭推镜（代码保留，幅度置 0 后下游自动跳过 zoompan）
+        if _zero_pair(zd.get("amp_min"), zd.get("amp_max")):
+            z_amp = 0.0
+        else:
+            try:
+                z_amp = rng.uniform(float(zd.get("amp_min", 0.01)), float(zd.get("amp_max", 0.03)))
+            except (TypeError, ValueError):
+                z_amp = rng.uniform(0.01, 0.03)
+        p["zoom_drift_amp"] = round(z_amp, 4)
+        p["zoom_drift_period"] = float(zd.get("period", 4.0) or 4.0)
+        p["zoom_drift_dir"] = rng.choice(["in", "out"])
+    else:
+        p["zoom_drift_amp"] = 0.0
+        p["zoom_drift_period"] = 4.0
+        p["zoom_drift_dir"] = "in"
+    # 动态微旋（正弦渐变 + 单向恒速漂移）
+    # 统一规则：幅度 0~0 → 关闭正弦摆动；周期 0~0 → 周期随机关闭（用固定默认）；
+    # 速度 0~0 → 关闭恒速漂移。幅度与速度均为 0 时下游自动跳过 rotate 滤镜
+    # （微旋代码完整保留，仅取值置零）
     rd = params.get("rotate_drift") or {}
-    try:
-        r_amp = rng.uniform(float(rd.get("amp_min", 0.3)), float(rd.get("amp_max", 0.8)))
-    except (TypeError, ValueError):
-        r_amp = rng.uniform(0.3, 0.8)
+    if _zero_pair(rd.get("amp_min"), rd.get("amp_max")):
+        r_amp = 0.0
+    else:
+        try:
+            r_amp = rng.uniform(float(rd.get("amp_min", 0.3)), float(rd.get("amp_max", 0.8)))
+        except (TypeError, ValueError):
+            r_amp = rng.uniform(0.3, 0.8)
     p["rotate_drift_amp"] = round(r_amp, 3)
-    p["rotate_drift_period"] = float(rd.get("period", 3.0) or 3.0)
+    if _zero_pair(rd.get("period_min"), rd.get("period_max")):
+        r_per = 8.0
+    else:
+        try:
+            r_per = rng.uniform(float(rd.get("period_min", 3.0)), float(rd.get("period_max", 6.0)))
+        except (TypeError, ValueError):
+            r_per = rng.uniform(3.0, 6.0)
+    p["rotate_drift_period"] = round(r_per, 2)
+    # 微旋速度：单向恒速漂移（°/s），符号随机 → 左旋或右旋；0~0 → 关闭漂移
+    if _zero_pair(rd.get("speed_min"), rd.get("speed_max")):
+        r_spd = 0.0
+    else:
+        try:
+            r_spd = rng.uniform(float(rd.get("speed_min", 0.02)), float(rd.get("speed_max", 0.08)))
+        except (TypeError, ValueError):
+            r_spd = rng.uniform(0.02, 0.08)
+        r_spd = r_spd if rng.random() < 0.5 else -r_spd
+    p["rotate_drift_speed"] = round(r_spd, 4)
+    # 随机初始相位（0~2π）→ 每段正弦波起点不同，避免分段同角度起步
+    p["rotate_drift_phase"] = round(rng.uniform(0, 2 * math.pi), 4)
+
+    # ── 非对称构图扰动（轻度裁剪，左右/上下独立随机）──
+    ac = (config.get("video") or {}).get("asymmetric_crop") or {}
+    if ac.get("enable", False):
+        try:
+            ac_lo = float(ac.get("min", 0.02))
+            ac_hi = float(ac.get("max", 0.04))
+        except (TypeError, ValueError):
+            ac_lo, ac_hi = 0.02, 0.04
+        p["asym_crop_l"] = round(rng.uniform(ac_lo, ac_hi), 4)
+        p["asym_crop_r"] = round(rng.uniform(ac_lo, ac_hi), 4)
+        p["asym_crop_t"] = round(rng.uniform(ac_lo, ac_hi), 4)
+        p["asym_crop_b"] = round(rng.uniform(ac_lo, ac_hi), 4)
+    else:
+        p["asym_crop_l"] = p["asym_crop_r"] = 0.0
+        p["asym_crop_t"] = p["asym_crop_b"] = 0.0
+
+    # ── 极轻空间畸变（lenscorrection 镜头畸变）──
+    ld = (config.get("video") or {}).get("lens_distortion") or {}
+    if ld.get("enable", False):
+        try:
+            k1_max = float(ld.get("k1_range", 0.015))
+            k2_max = float(ld.get("k2_range", 0.005))
+        except (TypeError, ValueError):
+            k1_max, k2_max = 0.015, 0.005
+        p["lens_k1"] = round(rng.uniform(-k1_max, k1_max), 5)
+        p["lens_k2"] = round(rng.uniform(-k2_max, k2_max), 5)
+        p["lens_cx"] = round(rng.uniform(0.45, 0.55), 3)
+        p["lens_cy"] = round(rng.uniform(0.45, 0.55), 3)
+    else:
+        p["lens_k1"] = p["lens_k2"] = 0.0
+        p["lens_cx"], p["lens_cy"] = 0.5, 0.5
+
+    # ── 局部动态扰动（geq 高斯位移漂移）──
+    md = (config.get("video") or {}).get("mask_drift") or {}
+    if md.get("enable", False):
+        try:
+            md_str = int(md.get("strength", 2))
+        except (TypeError, ValueError):
+            md_str = 2
+        # 漂移振幅 1~3 像素（按 strength 缩放），周期 8~20s
+        md_amp = round(rng.uniform(1, 2 + md_str) , 2)
+        p["mask_drift_amp"] = md_amp
+        p["mask_drift_period"] = round(rng.uniform(8.0, 20.0), 2)
+        p["mask_drift_cx"] = round(rng.uniform(0.25, 0.75), 3)  # 归一化中心 X
+        p["mask_drift_cy"] = round(rng.uniform(0.25, 0.75), 3)  # 归一化中心 Y
+        p["mask_drift_radius"] = round(rng.uniform(0.15, 0.35), 3)  # 归一化半径
+        p["mask_drift_phase_x"] = round(rng.uniform(0, 2 * math.pi), 4)
+        p["mask_drift_phase_y"] = round(rng.uniform(0, 2 * math.pi), 4)
+    else:
+        p["mask_drift_amp"] = 0.0
 
     # ── 色彩 ──
     for key, dlo, dhi in (("brightness", 1.5, 4.0), ("contrast", 1.5, 4.0),
@@ -100,17 +206,38 @@ def generate_snapshot(preset: dict, config: dict = None, seed: int = None) -> di
 
     # ── 时序 ──
     lo, hi = _range_of(preset, "speed", 0.98, 1.02)
-    p["speed"] = round(rng.uniform(lo, hi), 4)
+    # 0~0 → 关闭变速（恒等值 1.0；0 是非法速度，必须显式拦截）
+    p["speed"] = 1.0 if _zero_range(preset, "speed") else round(rng.uniform(lo, hi), 4)
     lo, hi = _range_of(preset, "frame_dup", 0, 2)
     p["frame_dup"] = int(rng.randint(int(lo), int(hi)))
     p["frame_dup_pos"] = round(rng.uniform(0.25, 0.75), 3)  # 插入位置（相对时长比例）
-    lo, hi = _range_of(preset, "scene_jitter", 0, 2)
-    p["scene_jitter"] = int(rng.randint(int(lo), int(hi)))
+
+    # 极短片段倒放/循环（配置 video.reverse_loop）：按概率触发，
+    # 每次快照重新掷骰，重试时自然拿到不同的时序扰动参数。
+    # 实际时间点由 build 阶段结合时长确定；分段模式下不启用。
+    rl_cfg = (config.get("video") or {}).get("reverse_loop") or {}
+    p["rl_mode"] = None
+    if rl_cfg.get("enable", False):
+        try:
+            prob = float(rl_cfg.get("probability", 0.4))
+        except (TypeError, ValueError):
+            prob = 0.4
+        if rng.random() < prob:
+            p["rl_mode"] = rng.choice(["reverse", "loop"])
+            p["rl_pos_rel"] = round(rng.uniform(0.15, 0.85), 4)   # 片段位置（相对时长）
+            p["rl_seg_len"] = round(rng.uniform(0.1, 0.2), 3)     # 片段时长(秒)
+            p["rl_repeats"] = rng.choice([2, 3])                  # loop 时 B 出现次数（A+B×n+C）
+
+    # 周期性微量抽帧（配置 video.frame_drop）：每 interval 帧随机删 1 帧，
+    # 具体删帧位置由 build 阶段结合总帧数生成（这里只掷启用骰）。
+    fd_cfg = (config.get("video") or {}).get("frame_drop") or {}
+    p["frame_drop_on"] = bool(fd_cfg.get("enable", False)) and rng.random() < 0.9
 
     # ── 音频 ──
-    # 音频速度 = 视频速度 × 微偏因子 → 保证音画不漂移
+    # 音频速度 = 视频速度 × 微偏因子 → 保证音画不漂移；0~0 → 关闭音频微变速（因子 1.0）
     lo, hi = _range_of(preset, "audio_speed", 0.998, 1.002)
-    p["audio_atempo"] = round(p["speed"] * rng.uniform(lo, hi), 5)
+    _as_factor = 1.0 if _zero_range(preset, "audio_speed") else rng.uniform(lo, hi)
+    p["audio_atempo"] = round(p["speed"] * _as_factor, 5)
     lo, hi = _range_of(preset, "audio_pitch", 0.3, 0.8)
     p["audio_pitch"] = round(_signed(rng, lo, hi), 3)  # 半音
     lo, hi = _range_of(preset, "audio_eq", 1.0, 2.0)
@@ -133,40 +260,13 @@ def generate_snapshot(preset: dict, config: dict = None, seed: int = None) -> di
     p["audio_fade"] = min(0.5, max(0.1, p["trim_head"]))
 
     # ── 编码（压缩域扰动，优先级低于画面变换）──
+    # 0~0 → 关闭随机：CRF 用基线 23（下游仍钳制下限 24），GOP 用默认 40
     lo, hi = _range_of(preset, "crf", 20, 26)
-    p["crf"] = int(rng.randint(int(lo), int(hi)))
+    p["crf"] = 23 if _zero_range(preset, "crf") else int(rng.randint(int(lo), int(hi)))
     lo, hi = _range_of(preset, "gop", 25, 55)
-    p["gop"] = int(rng.randint(int(lo), int(hi)))
+    p["gop"] = 40 if _zero_range(preset, "gop") else int(rng.randint(int(lo), int(hi)))
     p["bframes"] = rng.randint(1, 3)
     p["sc_threshold"] = rng.randint(20, 50)
-
-    # ── 可选增强（默认关；开启后参数随机）──
-    extra = (config.get("extra") or {})
-    snap["extra"] = {}
-    if extra.get("minterpolate", {}).get("enable", False):
-        snap["extra"]["minterpolate"] = {
-            "target_fps": int(extra.get("minterpolate", {}).get("target_fps", 60))
-        }
-    if extra.get("wave_displace", {}).get("enable", False):
-        wd = extra.get("wave_displace", {})
-        amp_lo, amp_hi = 1, 3
-        per_lo, per_hi = 2, 5
-        try:
-            amp_lo, amp_hi = float(wd.get("amp_px", {}).get("min", 1)), float(wd.get("amp_px", {}).get("max", 3))
-            per_lo, per_hi = float(wd.get("period_sec", {}).get("min", 2)), float(wd.get("period_sec", {}).get("max", 5))
-        except (TypeError, ValueError):
-            pass
-        snap["extra"]["wave_displace"] = {
-            "amp_px": round(rng.uniform(amp_lo, amp_hi), 2),
-            "period_sec": round(rng.uniform(per_lo, per_hi), 2),
-            "horizontal": rng.random() < 0.5,
-        }
-    if extra.get("region_split", {}).get("enable", False):
-        rs = extra.get("region_split", {})
-        snap["extra"]["region_split"] = {
-            "regions": rng.randint(2, 4),
-            "var_pct": round(rng.uniform(2, 5), 2),
-        }
 
     return snap
 
@@ -176,7 +276,8 @@ def snapshot_summary(snap: dict) -> str:
     p = snap.get("params", {})
     return (
         f"预设={snap.get('preset_label')} seed={snap.get('seed')} "
-        f"scale={p.get('scale')} rot_drift={p.get('rotate_drift_amp')}° "
-        f"speed={p.get('speed')} bright={p.get('brightness')}% "
+        f"scale={p.get('scale')} rot_drift={p.get('rotate_drift_amp')}°"
+        f" rot_spd={p.get('rotate_drift_speed')}°/s"
+        f" speed={p.get('speed')} bright={p.get('brightness')}% "
         f"crf={p.get('crf')} gop={p.get('gop')}"
     )

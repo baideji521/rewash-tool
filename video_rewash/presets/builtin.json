@@ -21,8 +21,7 @@
             "crf":           { "min": 20,    "max": 26 },
             "gop":           { "min": 25,    "max": 55 },
             "zoom_drift":    { "amp_min": 0.01, "amp_max": 0.04, "period": 4.0 },
-            "rotate_drift":  { "amp_min": 0.5,  "amp_max": 1.0,  "period": 3.0 },
-            "scene_jitter":  { "min": 1,     "max": 2 }
+            "rotate_drift":  { "amp_min": 0.4,  "amp_max": 1.8,  "period_min": 6.0, "period_max": 14.0, "speed_min": 0.01, "speed_max": 0.05 }
         }
     },
     "standard": {
@@ -46,8 +45,7 @@
             "crf":           { "min": 18,    "max": 28 },
             "gop":           { "min": 20,    "max": 60 },
             "zoom_drift":    { "amp_min": 0.01, "amp_max": 0.07, "period": 3.0 },
-            "rotate_drift":  { "amp_min": 1.0,  "amp_max": 1.5,  "period": 2.0 },
-            "scene_jitter":  { "min": 2,     "max": 3 }
+            "rotate_drift":  { "amp_min": 0.8,  "amp_max": 2.5,  "period_min": 5.0, "period_max": 12.0, "speed_min": 0.02, "speed_max": 0.08 }
         }
     },
     "aggressive": {
@@ -71,14 +69,7 @@
             "crf":           { "min": 17,    "max": 30 },
             "gop":           { "min": 15,    "max": 70 },
             "zoom_drift":    { "amp_min": 0.02, "amp_max": 0.10, "period": 2.5 },
-            "rotate_drift":  { "amp_min": 1.5,  "amp_max": 2.5,  "period": 1.8 },
-            "scene_jitter":  { "min": 3,     "max": 5 }
+            "rotate_drift":  { "amp_min": 1.2,  "amp_max": 3.5,  "period_min": 4.0, "period_max": 10.0, "speed_min": 0.03, "speed_max": 0.12 }
         }
-    },
-    "_extra_default": {
-        "_说明": "3.2 可选增强手段默认值（独立开关，默认全关）",
-        "minterpolate": { "enable": false, "target_fps": 60 },
-        "wave_displace": { "enable": false, "amp_px": { "min": 1, "max": 3 }, "period_sec": { "min": 2, "max": 5 } },
-        "region_split":  { "enable": false, "regions": { "min": 2, "max": 4 }, "var_pct": { "min": 2, "max": 5 } }
     }
 }

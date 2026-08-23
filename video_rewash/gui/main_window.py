@@ -362,6 +362,16 @@ class MainWindow(QMainWindow):
                     or 4
                 ),
 
+            "video_concurrency":
+                int(
+                    config_get(
+                        cfg,
+                        "performance.video_concurrency",
+                        1,
+                    )
+                    or 1
+                ),
+
             "normalize":
                 bool(
                     config_get(
@@ -463,18 +473,8 @@ class MainWindow(QMainWindow):
                 last_used
             )
         )
-
-        ov = (
-            cfg
-            .get("preset_overrides", {})
-            .get(last_used)
-        )
-
-        if isinstance(ov, dict) and ov:
-
-            self._preset_snap["params"] = (
-                copy.deepcopy(ov)
-            )
+        # 注：预设参数完全由 get_preset() 从预设文件（builtin/custom）加载；
+        # 设置对话框的参数微调仅在当前会话生效，永久保存请用「保存为自定义」。
 
         # ----------------------------------------------------
         # 构建界面
@@ -1330,12 +1330,6 @@ class MainWindow(QMainWindow):
                 dlg.get_params()
             )
 
-            # 参数正常持久化
-            self._persist_preset_params(
-                key,
-                self._preset_snap["params"],
-            )
-
             self._log(
                 f"参数已保存"
                 f" | 每素材版本数={dlg.get_version_count()}"
@@ -1347,25 +1341,6 @@ class MainWindow(QMainWindow):
 
         self._update_preset_label()
 
-    def _persist_preset_params(
-        self,
-        key,
-        params,
-    ):
-
-        """全局持久化预设参数"""
-
-        cfg = STORE.get_data()
-
-        cfg.setdefault(
-            "preset_overrides",
-            {},
-        )[key] = copy.deepcopy(
-            params
-        )
-
-        STORE.save()
-
     def _persist_ui_state(self):
 
         """全局持久化流程开关和标准化规格"""
@@ -1375,9 +1350,6 @@ class MainWindow(QMainWindow):
         u = self._ui
 
         cfg["switches"] = {
-            "segment":
-                u["segment_count"] > 1,
-
             "normalize":
                 u["normalize"],
 
@@ -1387,6 +1359,23 @@ class MainWindow(QMainWindow):
 
         cfg["segment_count"] = (
             u["segment_count"]
+        )
+
+        cfg.setdefault(
+            "performance",
+            {},
+        )["video_concurrency"] = max(
+            1,
+            min(
+                16,
+                int(
+                    u.get(
+                        "video_concurrency",
+                        1,
+                    )
+                    or 1
+                ),
+            ),
         )
 
         cfg["normalize"] = {
@@ -1514,9 +1503,6 @@ class MainWindow(QMainWindow):
 
         cfg["switches"] = {
 
-            "segment":
-                u["segment_count"] > 1,
-
             "normalize":
                 u["normalize"],
 
@@ -1526,6 +1512,23 @@ class MainWindow(QMainWindow):
 
         cfg["segment_count"] = (
             u["segment_count"]
+        )
+
+        cfg.setdefault(
+            "performance",
+            {},
+        )["video_concurrency"] = max(
+            1,
+            min(
+                16,
+                int(
+                    u.get(
+                        "video_concurrency",
+                        1,
+                    )
+                    or 1
+                ),
+            ),
         )
 
         cfg["normalize"] = {

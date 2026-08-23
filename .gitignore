@@ -44,3 +44,13 @@ env/
 Thumbs.db
 .DS_Store
 desktop.ini
+
+# ffmpeg 文档中超过 1MB 的大 HTML
+ffmpeg/doc/ffmpeg-all.html
+ffmpeg/doc/ffmpeg-filters.html
+ffmpeg/doc/ffplay-all.html
+ffmpeg/doc/ffprobe-all.html
+
+# 运行时日志与工具缓存
+logs/
+.qoder/

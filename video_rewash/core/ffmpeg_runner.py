@@ -21,6 +21,8 @@ STOP_EVENT = threading.Event()
 
 _PROBE_CACHE = {}
 _PROBE_LOCK = threading.Lock()
+_CROP_CACHE = {}
+_CROP_LOCK = threading.Lock()
 
 
 def no_window_kwargs() -> dict:
@@ -212,6 +214,7 @@ def probe_media(ffprobe_path: str, video_path: str) -> dict:
             "has_audio": False,
             "width": 0, "height": 0, "fps": 0.0,
             "v_codec": "", "a_codec": "",
+            "a_sample_rate": 0, "a_channels": 0,
             "bit_rate": 0,      # format 总码率(bps)，体积对齐用
             "a_bit_rate": 0,    # 音频流码率(bps)
         }
@@ -238,6 +241,8 @@ def probe_media(ffprobe_path: str, video_path: str) -> dict:
                 result["has_audio"] = True
                 result["a_codec"] = s.get("codec_name", "")
                 try:
+                    result["a_sample_rate"] = int(s.get("sample_rate", 0) or 0)
+                    result["a_channels"] = int(s.get("channels", 0) or 0)
                     result["a_bit_rate"] = int(float(s.get("bit_rate", 0) or 0))
                 except (TypeError, ValueError):
                     pass
@@ -254,6 +259,67 @@ def has_audio(ffprobe_path: str, video_path: str) -> bool:
 
 def get_duration(ffprobe_path: str, video_path: str) -> float:
     return float(probe_media(ffprobe_path, video_path).get("duration", 0.0) or 0.0)
+
+
+# ──────────────────────────────────────────────
+#  黑边检测（分析阶段只跑一次，结果缓存）
+# ──────────────────────────────────────────────
+
+def detect_black_crop(ffmpeg_path: str, ffprobe_path: str, video_path: str):
+    """
+    cropdetect 黑边检测：只在分析阶段执行一次（同文件缓存），
+    后续正式处理直接使用检测结果，不重复加入多个 FFmpeg 任务。
+    返回 (w, h, x, y) 或 None（无黑边/检测失败由调用方回退原始尺寸）。
+    """
+    try:
+        st = os.stat(video_path)
+        key = (video_path, st.st_size, int(st.st_mtime))
+        with _CROP_LOCK:
+            if key in _CROP_CACHE:
+                return _CROP_CACHE[key]
+
+        media = probe_media(ffprobe_path, video_path)
+        ow, oh = int(media.get("width", 0)), int(media.get("height", 0))
+        dur = float(media.get("duration", 0.0) or 0.0)
+        if ow <= 0 or oh <= 0:
+            return None
+
+        cmd = [ffmpeg_path, "-hide_banner", "-nostdin"]
+        if dur > 30:
+            cmd += ["-t", "30"]  # 只分析前 30s，检测够用即可
+        cmd += ["-i", video_path, "-vf", "cropdetect=24:16:0",
+                "-an", "-f", "null", "-"]
+        r = run_ffmpeg(cmd, timeout=180)
+        if r.returncode not in (0, -15):
+            with _CROP_LOCK:
+                _CROP_CACHE[key] = None
+            return None
+
+        # 取出现最多的检测结果（最末行通常已收敛，众数更稳）
+        counts = {}
+        for m in re.finditer(r"crop=(\d+):(\d+):(\d+):(\d+)", r.stderr or ""):
+            counts[m.group(0)] = counts.get(m.group(0), 0) + 1
+        if not counts:
+            with _CROP_LOCK:
+                _CROP_CACHE[key] = None
+            return None
+        best = max(counts, key=counts.get)
+        _, w, h, x, y = re.match(r"crop=(\d+):(\d+):(\d+):(\d+)", best).groups()
+        w, h, x, y = int(w), int(h), int(x), int(y)
+        # 对齐偶数（yuv420p 要求），越界保护
+        w -= w % 2
+        h -= h % 2
+        x -= x % 2
+        y -= y % 2
+        w = min(w, ow - x)
+        h = min(h, oh - y)
+        # 裁不到 5% 视为无黑边，不值得裁剪
+        rect = (w, h, x, y) if (w < ow - 8 or h < oh - 8) else None
+        with _CROP_LOCK:
+            _CROP_CACHE[key] = rect
+        return rect
+    except Exception:
+        return None
 
 
 # ──────────────────────────────────────────────────────────────

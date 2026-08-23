@@ -173,9 +173,3 @@ def delete_custom(name: str) -> bool:
             del _custom_cache[name]
             return _save_custom()
     return False
-
-
-def get_extra_defaults() -> dict:
-    """可选增强手段默认配置"""
-    bi = _load_builtin()
-    return copy.deepcopy(bi.get("_extra_default", {}))

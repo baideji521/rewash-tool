@@ -40,7 +40,6 @@ PARAM_DEFS = [
     ("noise", "噪点强度", "色彩", 2, False),
     ("speed", "变速", "时序", 4, False),
     ("frame_dup", "重复帧(帧)", "时序", 0, False),
-    ("scene_jitter", "场景扰动(帧)", "时序", 0, False),
     ("audio_speed", "音频微变速", "音频", 4, False),
     ("audio_pitch", "音频变调(半音)", "音频", 3, True),
     ("audio_eq", "音频EQ(dB)", "音频", 2, True),
@@ -224,6 +223,24 @@ class SettingsDialog(QDialog):
                     grid.addWidget(hi_spin, row, 2)
                     self._boxes[key] = (lo_spin, hi_spin)
                     row += 1
+                # 微旋速度（rotate_drift 的 speed_min/speed_max）
+                rd_node = params.get("rotate_drift") or {}
+                if isinstance(rd_node, dict):
+                    grid.addWidget(QLabel("微旋速度(°/s) ±"), row, 0)
+                    spd_lo, spd_hi = QDoubleSpinBox(), QDoubleSpinBox()
+                    for spin in (spd_lo, spd_hi):
+                        spin.setRange(-1000, 1000)
+                        spin.setDecimals(3)
+                        spin.setSingleStep(0.01)
+                    try:
+                        spd_lo.setValue(float(rd_node.get("speed_min", 0.02)))
+                        spd_hi.setValue(float(rd_node.get("speed_max", 0.08)))
+                    except (TypeError, ValueError):
+                        pass
+                    grid.addWidget(spd_lo, row, 1)
+                    grid.addWidget(spd_hi, row, 2)
+                    self._boxes["rotate_drift_speed"] = (spd_lo, spd_hi)
+                    row += 1
             if group == "音频":
                 node = params.get("av_offset") or {}
                 if isinstance(node, dict) and "enable" in node:
@@ -262,6 +279,19 @@ class SettingsDialog(QDialog):
         fl.addWidget(self.chk_norm, 1, 0, 1, 3)
         fl.addWidget(self.chk_qc, 2, 0, 1, 3)
         lay.addWidget(proc_box)
+
+        conc_box = QGroupBox("视频并发数")
+        cl = QGridLayout(conc_box)
+        cl.addWidget(QLabel("视频并发数:"), 0, 0)
+        self.conc_spin = QSpinBox()
+        self.conc_spin.setRange(1, 16)
+        self.conc_spin.setValue(int(u.get("video_concurrency", 1) or 1))
+        cl.addWidget(self.conc_spin, 0, 1)
+        conc_tip = QLabel("(默认 1 顺序处理；同时处理的视频/版本任务数。"
+                          "数值越高吞吐量可能越高，但 CPU/GPU/显存压力也会增加)")
+        conc_tip.setStyleSheet("color:#888;font-size:11px")
+        cl.addWidget(conc_tip, 1, 0, 1, 3)
+        lay.addWidget(conc_box)
 
         norm_box = QGroupBox("输出标准化规格")
         nl = QGridLayout(norm_box)
@@ -445,9 +475,17 @@ class SettingsDialog(QDialog):
         self.preset_combo.blockSignals(False)
 
     def _refresh_res_combo(self, cur_w, cur_h):
-        """按当前比例刷新分辨率下拉，选中与当前宽高最接近的项"""
+        """按当前比例刷新分辨率下拉，选中与当前宽高最接近的项。
+        全量对接：已保存的自定义宽高若符合当前比例，保留为选项，不被隐式替换"""
         ar = self.aspect_combo.currentText()
-        res_list = RESOLUTION_PRESETS.get(ar, [])
+        res_list = list(RESOLUTION_PRESETS.get(ar, []))
+        if ar == "原始比例":
+            res_list = [(cur_w, cur_h)]
+        elif (cur_w, cur_h) not in res_list and cur_w > 0 and cur_h > 0:
+            # 保存值符合所选比例（容差 1%）才保留，否则由列表项接管（比例约束）
+            rw, rh = (float(x) for x in ar.split(":"))
+            if abs(cur_w / cur_h - rw / rh) / (rw / rh) <= 0.01:
+                res_list.append((cur_w, cur_h))
         self.res_combo.blockSignals(True)
         self.res_combo.clear()
         for w, h in res_list:
@@ -458,8 +496,6 @@ class SettingsDialog(QDialog):
                        key=lambda i: (abs(res_list[i][0] - cur_w)
                                       + abs(res_list[i][1] - cur_h)))
             self.res_combo.setCurrentIndex(best)
-        else:  # 原始比例：显示当前自定义宽高
-            self.res_combo.addItem(f"{cur_w}×{cur_h}", (cur_w, cur_h))
         self.res_combo.blockSignals(False)
 
     def _on_aspect_changed(self, text):
@@ -541,6 +577,7 @@ class SettingsDialog(QDialog):
         """流程开关 + 标准化规格（主界面持久化与处理使用）"""
         return {
             "segment_count": self.seg_spin.value(),
+            "video_concurrency": self.conc_spin.value(),
             "normalize": self.chk_norm.isChecked(),
             "quality_check": self.chk_qc.isChecked(),
             "aspect_ratio": self.aspect_combo.currentText(),
@@ -564,6 +601,14 @@ class SettingsDialog(QDialog):
                 lo, hi = hi, lo
             if key in ("zoom_drift", "rotate_drift"):
                 node["amp_min"], node["amp_max"] = lo, hi
+            elif key == "rotate_drift_speed":
+                # 微旋速度写入 rotate_drift 节点的 speed_min/speed_max
+                rd_node = params.get("rotate_drift") or {}
+                if not isinstance(rd_node, dict):
+                    rd_node = {}
+                rd_node["speed_min"], rd_node["speed_max"] = lo, hi
+                params["rotate_drift"] = rd_node
+                continue  # 不覆盖 params[key]
             else:
                 node["min"], node["max"] = lo, hi
             params[key] = node

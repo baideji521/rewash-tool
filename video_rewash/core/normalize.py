@@ -9,11 +9,37 @@ from ..core.config import config_get
 from ..video.filters import spec_encode_args
 
 
+def _parse_aspect(ar) -> tuple:
+    """解析比例字符串 "3:4" → (3.0, 4.0)；无效/原始比例返回 None"""
+    if not ar or not isinstance(ar, str) or ar.strip() in ("", "原始比例"):
+        return None
+    parts = ar.strip().split(":")
+    if len(parts) != 2:
+        return None
+    try:
+        rw, rh = float(parts[0]), float(parts[1])
+    except ValueError:
+        return None
+    if rw <= 0 or rh <= 0:
+        return None
+    return rw, rh
+
+
 def get_target_spec(config: dict) -> dict:
-    """读取标准化目标规格（全部有默认值）"""
+    """读取标准化目标规格（全部有默认值）。
+    画面比例全量对接：所选比例真实约束输出——若宽高与所选比例不符，
+    以宽为基准修正高度（偶数对齐）；选「原始比例」则不约束。"""
+    w = int(config_get(config, "normalize.width", 1080))
+    h = int(config_get(config, "normalize.height", 1440))
+    ar = _parse_aspect(config_get(config, "normalize.aspect_ratio", None))
+    if ar:
+        rw, rh = ar
+        target = rw / rh
+        if w > 0 and h > 0 and abs(w / h - target) / target > 0.01:
+            h = max(2, int(round(w * rh / rw)) // 2 * 2)
     return {
-        "width": int(config_get(config, "normalize.width", 1080)),
-        "height": int(config_get(config, "normalize.height", 1440)),
+        "width": w,
+        "height": h,
         "fps": int(config_get(config, "normalize.fps", 30)),
         "pix_fmt": str(config_get(config, "normalize.pix_fmt", "yuv420p")),
         "video_codec": str(config_get(config, "normalize.video_codec", "h264")),
