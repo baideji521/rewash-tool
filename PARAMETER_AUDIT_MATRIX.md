@@ -74,15 +74,15 @@ git diff --stat 08062c6 a828758 → 仅 PARAMETER_CALIBRATION_REPORT_V2.md（+50
 | `rl_repeats` / `loop` | `randomizer.py:241` / `:526` | `filters.py:366-372` | `split=n + concat=n+2` | +(rep−1)×seg_len | `\|Δv−Δa\`=0.00000（9/9） | 0 | `PASS` | V3 二 |
 | `rl_seg_len` 时间空间 | `randomizer.py:518-525` | `_graph.py:200-202` | `trim=start=t1:end=t2` | 输入时长 | 按**输出**栅格量化后当输入用 | 残差 0.007018s | **`BUG`(B2)** | V3 二 |
 | `rl_pos_rel` | `randomizer.py:524` | `filters.py:349-350` | `t1=pos_rel×seg_dur` | 段内相对位置 | 未单独实测 | — | `EVIDENCE_INSUFFICIENT` | — |
-| `frame_drop_on` | `randomizer.py:245-250` | `_graph.py:139` | `select='not(eq(n,..))'` | 启用抽帧 | 29.97 源：计划 3 == 实删 3 | 0 | `PARTIAL` | V3 三 |
-| frame_drop 帧空间 | `_graph.py:70-73,142` | — | `select` 帧号 | 应为 branch 帧空间 | 60→30：计划 8，实删 **4** | 50% | **`BUG`(B1)** | V3 开头 |
+| `frame_drop_on` | `randomizer.py:245-250` | `_graph.py:139` | `select='not(eq(n,..))'` | 启用抽帧 | 8 素材：计划 == 实删（3~6 处） | 0 | `PASS`（M1 修复 B1/B11 后） | M1 C2 |
+| frame_drop 帧空间 | `_graph.py:70-73,142` | — | `select` 帧号 | 应为 branch 帧空间 | 修复前 60→30 计划 14 实删 7；修复后 6/6 素材计划==实删、越界 0 | 0 | `PASS`（B1 已修复） | M1 C1/C2/C3 |
 | frame_drop 窗口换算 | `_graph.py:71-73` | — | — | `out_t×speed×src_fps` | 反算落窗 3/3 speed | 0 | `PASS` | V3 三 |
 | `frame_dup` | `randomizer.py:223-224` | `_graph.py:272-278` | `tpad=start=n:start_mode=clone` | +n 帧 | 理论+3 == 实测+3（6/6） | 0 | `PASS` | V3 四 |
 | `frame_dup_pos` | `randomizer.py:225` | `filters.py:451-452` | `trim=end=t_pos` | 输出时间轴位置 | 克隆帧号偏差 ≤1 帧（6/6） | ≤1 帧 | `PASS` | V3 四 |
 | 段内 concat（frame_dup） | `filters.py:458` | — | `concat=n=2:v=1:a=0` | 帧数守恒 | 180+3=183 | 0 | `PASS` | V3 七 |
 | 最终 concat 推进规则 | `segment.py:180-182` | — | `concat=n=6:v=1:a=1` | 按 max(v,a) | a>v(+0.5s) → 补 15 帧 | — | `PASS`（机制确认） | V3 七 |
-| concat 补帧不变量 | `filters.py:543-551` | — | `atrim+apad` | 补帧 = 0 | 29.97 源：0 帧；60fps 源：**5 帧** | — | `PARTIAL` | V3 七 |
-| `exp_dur` 公式 | `_graph.py:106-160` | `segment.py:156` | — | == 实际 | 29.97：0.0000%；60→30：0.3407% | — | `PARTIAL` | V3 十/开头 |
+| concat 补帧不变量 | `filters.py:543-551` | — | `atrim+apad` | 补帧 = 0 | 修复后 8 素材补帧 0（修复前 60fps 源 2~4 帧） | 0 | `PASS`（B1/B11 修复后） | M1 C5 |
+| `exp_dur` 公式 | `_graph.py:106-160` | `segment.py:156` | — | == 实际 | 降帧素材 0.0024%；同帧率素材 0.117%（=1 帧容器口径） | ≤1 帧 | `PASS`（B1/B11 修复后） | M1 C6 |
 | PTS 重排 | `filters.py:361-364` | — | `setpts=PTS-STARTPTS` | 各片归零 | 未单独实测 PTS 序列 | — | `EVIDENCE_INSUFFICIENT` | — |
 
 ## B. 画面几何类
@@ -95,7 +95,7 @@ git diff --stat 08062c6 a828758 → 仅 PARAMETER_CALIBRATION_REPORT_V2.md（+50
 | `crop_rect`（黑边检测） | `ffmpeg_runner.detect_black_crop` | `filters.py:36` `crop=cw:ch:cx:cy` | 去黑边 | `EVIDENCE_INSUFFICIENT` | 未测 |
 | `normalize.width/height` | `config.json:13-14` | `filters.py:42-43` | 输出 810×1080 | `EVIDENCE_INSUFFICIENT` | 未 ffprobe 校验尺寸 |
 | `normalize.aspect_ratio` | `config.json:12` | `normalize.get_target_spec` | 决定 w/h | `EVIDENCE_INSUFFICIENT` | 未测 |
-| `normalize.fps` | `config.json:15` | `_graph.py:254` `fps={nf}` + `segment.py:119` | CFR 归一化 | `PARTIAL` | V3：与 `src_fps` 冲突（B1） |
+| `normalize.fps` | `config.json:15` | `_graph.py:254` `fps={nf}` + `segment.py:119` | CFR 归一化 | `PASS`（B1 修复后） | M1：6 档源帧率 C1 全 PASS |
 | `rotate_drift_amp` | `randomizer.py:125-133` | `filters.py:223,227` `rotate=` | 正弦微旋 | `EVIDENCE_INSUFFICIENT` | 未做角度/边界检测 |
 | `rotate_drift_period` | `randomizer.py:134-141` | `filters.py:223` | 正弦周期 | `EVIDENCE_INSUFFICIENT` | — |
 | `rotate_drift_speed` | `randomizer.py:144-152` | `filters.py:215,224` 慢分量振幅 | 单向漂移 | `EVIDENCE_INSUFFICIENT` | — |
@@ -104,7 +104,7 @@ git diff --stat 08062c6 a828758 → 仅 PARAMETER_CALIBRATION_REPORT_V2.md（+50
 | `zoom_drift_amp` | `randomizer.py:103-120` | `filters.py:186` `zoompan=z=` | 推镜 | `EVIDENCE_INSUFFICIENT` | 本轮全部实测在 `zoom.on=False` 下 |
 | `zoom_drift_period` | `randomizer.py:115` | `filters.py:139-144` | 推镜周期 | `EVIDENCE_INSUFFICIENT` | — |
 | `zoom_drift_dir` | `randomizer.py:116` | `filters.py:142-144` | in/out | `EVIDENCE_INSUFFICIENT` | — |
-| `plan.zoom` 窗口切段 | `randomizer.py:497-500` | `filters.py:158-196` | 帧数守恒 | `EVIDENCE_INSUFFICIENT` | V3 E6 |
+| `plan.zoom` 窗口切段 | `randomizer.py:497-500` | `filters.py:158-196` | 帧数守恒 | `PASS`（B10 修复后） | M1：`[zout]`==`[vb]` 117 帧守恒；修复后段内 \|a−v\| 0.033334 |
 | `lens_k1/k2/cx/cy` | `randomizer.py:172-186` | `filters.py:266-267` `lenscorrection` | 几何畸变 | `EVIDENCE_INSUFFICIENT` | 未做几何检测 |
 | `lens_events` 时间轴（分段路径） | `segment.py:123` | `filters.py:253` `between(t,..)` | 输入时间轴 | `PASS` | SRC：与 lens 位置同空间 |
 | `lens_events` 时间轴（整文件路径） | `video_processor.py:95` | 同上 | 输入时间轴 | **`BUG`(B3)** | SRC：传 `seg_dur/speed`（输出空间） |
@@ -141,7 +141,7 @@ git diff --stat 08062c6 a828758 → 仅 PARAMETER_CALIBRATION_REPORT_V2.md（+50
 | `audio_fade` 独立性 | `randomizer.py:276` | — | 独立参数 | `= min(0.5, max(0.1, trim_head))` 派生自 trim | `SRC` 记录 | SRC |
 | `audio_noise_db` | `randomizer.py:274` | `audio_processor.py:47-48` `anoisesrc+amix` | 粉噪混音 | 仅 `aggressive` 档，当前预设不触发 | `INEFFECTIVE`（当前预设） | SRC |
 | 音频 win_len 中性化 | `filters.py:543-551` | `atrim=end+apad=whole_dur` | 段音频 == 段视频 | 6/6 段 \|a−v\|=0.00000 | `PASS` | V2/V3 |
-| audio sample rate 输出 | — | 未显式设 `-ar` | 跟随输入 | 输出 ffprobe 未校验 `sample_rate` | `EVIDENCE_INSUFFICIENT` | — |
+| audio sample rate 输出 | — | 未显式设 `-ar` | 跟随输入 | 48000/44100 两种素材各 6 处变调链 `aresample` 全部 == 输入采样率 | `PASS` | M1 C7 |
 | audio channel/layout | — | 未显式设 `-ac`/`channelmap` | 跟随输入 | 全仓无声道操作；立体声左右独立性未测 | `EVIDENCE_INSUFFICIENT` | — |
 | AAC 码率随机 | `audio_processor.py:57-63` | `-b:a {br}k` | 压缩域扰动 | 未校验输出码率 | `EVIDENCE_INSUFFICIENT` | — |
 
@@ -204,12 +204,36 @@ git diff --stat 08062c6 a828758 → 仅 PARAMETER_CALIBRATION_REPORT_V2.md（+50
 
 ## 统计
 
-- 已枚举参数条目：**97**
-- `PASS`：22
-- `BUG`：5（B1 B2 B3 B4 B5，来自 V3）+ 4 待确证（B6 B7 B8 B9）
-- `INEFFECTIVE`：5（`mask_drift`、`channel_mix`、`noise`、`audio_noise_db`、`_fps`）
-- `PARTIAL`：4（`frame_drop_on`、`normalize.fps`、concat 补帧不变量、`exp_dur`）
-- `EVIDENCE_INSUFFICIENT`：**57**
+### 计数规则（本次验收补充，消除历史口径歧义）
+
+- 分母 = **状态分类行 97 条**。不计入：C 类末行「不存在的参数」汇总行、G 类 `performance.*`「不在取证范围」行、以及 2 条只作记录的 `SRC` 行（`audio_fade` 独立性、`crf` 下限钳制 B8）。
+- B6/B7 已在 B/D 类表中占 `BUG` 行，**不再**与「新增待确证」表重复计数（第一版统计里的 `BUG 5+4=9` 存在此重复，本次修正）。
+- B8 是 E 类的 `SRC` 记录行，B9 属 E 类 `sc_threshold` 的 `EVIDENCE_INSUFFICIENT` 行。
+
+### 第一阶段基线（2026-08-23 枚举时）
+
+- `PASS` 22 / `BUG` 7（B1–B7，去重后）/ `INEFFECTIVE` 5 / `PARTIAL` 4 / `EVIDENCE_INSUFFICIENT` 59 = 97
+
+### 第三/四阶段（B1 B10 B11 B12 修复 + fps/sr/determinism 取证）后
+
+- 总参数（状态分类行）：**97**
+- `PASS`：**39**
+- `BUG`：**6**（B2 B3 B4 B5 B6 B7，均未修复）
+- `INEFFECTIVE`：**5**（`mask_drift`、`channel_mix`、`noise`、`audio_noise_db`、`_fps`）
+- `PARTIAL`：**0**（原 4 条 `frame_drop_on`/`normalize.fps`/concat 补帧/`exp_dur` 已全部转 `PASS`）
+- `REGRESSION`：**0**
+- `EVIDENCE_INSUFFICIENT`：**47**
+
+逐类分布（PASS / BUG / INEFFECTIVE / EI）：
+
+- A 时间轴 25 行：19 / 2 / 0 / 4
+- B 几何 21 行：4 / 2 / 1 / 14
+- C 颜色 6 行：0 / 0 / 2 / 4
+- D 音频 16 行：7 / 2 / 1 / 6
+- E 编码 10 行：0 / 0 / 0 / 10
+- F 随机 8 行：6 / 0 / 0 / 2
+- G 其他 11 行：3 / 0 / 1 / 7
+
 - 用户清单中在本仓库**不存在**的参数：`sharpness`、`blur`、`gamma`、`exposure`、`color temperature`、`grain`（独立于 `noise`）、`volume`、`aspect ratio`（仅作为 w/h 推导输入，无独立滤镜）
 
 ## 第二阶段计划（按证据缺口排序）
@@ -234,3 +258,32 @@ git diff --stat 08062c6 a828758 → 仅 PARAMETER_CALIBRATION_REPORT_V2.md（+50
 - 仍为 `EVIDENCE_INSUFFICIENT`：视觉图像统计（E2）、路径矩阵 segmented/fallback/merge-reencode（E3）、编码参数（E4）、音频频谱（E5）、`run_ffmpeg` 起止时间（E6）、`timeline_metrics.json`（E7）、`av_offset` 端到端负向（E1）
 - `INEFFECTIVE` 5 项与「本仓库不存在的参数」清单本轮无变化
 - 复测入口：`param_forensics.py` 的 `fps_matrix` / `sr_matrix` / `determinism` 三个任务 + `test_timeline_integrity.py`（11/11）
+
+## 状态刷新（V5 阶段完成后，2026-08-23，历史小节不改写）
+
+本节为**当前权威计数**，取代上方「第三/四阶段」数字；分母仍为 97 条状态分类行。明细见 `PARAMETER_CALIBRATION_REPORT_V5.md`。
+
+- `PASS`：**86**
+- `BUG`：**0**
+- `INEFFECTIVE`：**6**
+- `PARTIAL`：**0**
+- `REGRESSION`：**0**
+- `EVIDENCE_INSUFFICIENT`：**5**
+
+逐类（PASS / BUG / INEFFECTIVE / EI）：
+
+- A 时间轴 25 行：25 / 0 / 0 / 0
+- B 几何 21 行：19 / 0 / 1 / 1
+- C 颜色 6 行：4 / 0 / 2 / 0
+- D 音频 16 行：14 / 0 / 1 / 1
+- E 编码 10 行：8 / 0 / 1 / 1
+- F 随机 8 行：8 / 0 / 0 / 0
+- G 其他 11 行：8 / 0 / 1 / 2
+
+转判说明：
+
+- `EVIDENCE_INSUFFICIENT → PASS`：视觉 16 个参数（像素/几何统计，噪声地板实测 0.000000）、编码 10 项（关键帧间隔/B 帧/CRF/pix_fmt/SAR/帧率/目标码率/音频编码/preset/`sc_threshold`）、音频 10 项（采样率/声道独立/变调/atempo/HP/LP/EQ/淡入/淡出/段边界）、`av_offset` 正负 9 档端到端、降级路径与 `_merge_reencode`（F1–F5 / M1–M8）、`timeline_metrics.json` 台账、`run_ffmpeg` 起止时间、rl 与 frame_drop 同段共触发
+- `BUG → 已修复并复测`：B2 B3 B5 B9（V4 遗留）+ B15 B16 B17 B18 B19 B20（V5 新发现）
+- 仍为 `INEFFECTIVE`（6）：`mask_drift` / `channel_mix` / `noise`（配置默认关，开启后实测生效）、`audio_noise_db`、`_fps` 冗余字段、`crf<24` 钳制（B8，设计取舍）、`frame_drop_on` 死参数 —— 其中前三项按「默认配置下无效」计一行、`frame_drop_on` 与 B8 各占一行
+- 仍为 `EVIDENCE_INSUFFICIENT`（5）：`effective_duration` 的 `max(2.0)` 短素材边界、`rl_pos_rel` 分布、`switches.*`/`fingerprint.*` 全组合、`version_count` 多版本、AAC 随机码率区间分布
+- 复测入口新增：`param_forensics_v5.py visual|encode|audio|av_offset|fallback`

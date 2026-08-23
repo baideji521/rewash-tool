@@ -182,3 +182,12 @@ ffmpeg\bin\ffmpeg.exe -i tests\material\TEST-E.mp4 -vf "fps=30,trim=start=5.688:
 - 未改 GUI；未删除任何测试；未删除任何历史报告。
 - 未 `commit` / `push` / `reset` / `clean` / `checkout` / `restore`；未处理 `AA` / `A` / `D` / 未合并状态。
 - 所有结论均附源码位置 + FFmpeg 证据 + 实测数字；无实测者已标【证据不足】。
+
+## 7 后续（V5 阶段，本文不改写）
+
+V4 列出的 7 项【证据不足】（视觉统计 / 音频频谱 / 编码参数 / 降级路径与 `_merge_reencode` / `av_offset` 负向端到端 / `run_ffmpeg` 起止时间 / `timeline_metrics.json`）已在 V5 阶段全部闭环，并新发现 6 个产品 Bug（B15–B20）、收口 4 个 V4 遗留项（B2 B3 B5 B9）。
+
+- 结论与全部实测数字：`PARAMETER_CALIBRATION_REPORT_V5.md`
+- Bug 明细与修复前后对比：`PARAMETER_BUG_REPORT_V4.md`「V5 阶段追加」小节
+- 参数计数的当前权威版本：`PARAMETER_AUDIT_MATRIX.md`「状态刷新（V5 阶段完成后）」
+- 新增取证入口：`python tests/param_forensics_v5.py visual encode audio av_offset fallback`

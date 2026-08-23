@@ -13,7 +13,9 @@
   `normalize.width=324`、`normalize.height=432`、`normalize.video_codec=h264_libx264`
   —— 只为缩短编码耗时；时间轴结论与画布尺寸无关
 - seed：`1786869947670`（全部用例同一 seed）
-- **本阶段未修改任何产品代码**
+- **第二阶段（本文件上半部分，即「修复记录」之前的所有内容）未修改任何产品代码**；
+  修复发生在第四阶段，见文末「修复记录」。上半部分的行号是**修复前**的源码行号，
+  修复后的行号在「修复记录」中单独列出。
 
 ## FPS 矩阵总览（真实端到端，6 段 single-pass）
 
@@ -104,8 +106,10 @@
   （25fps 源 → 30fps 输出是最典型情形）
 - **复现步骤**
   ```
-  python tests/param_forensics.py fps      # 生成素材与 filtergraph
-  python tests/drill_lastseg.py            # 逐 label 计帧
+  python tests/param_forensics.py fps_matrix   # 生成素材与 filtergraph
+  # 逐 label 计帧：见 frame_metrics.json 的 vt/vb/v_measured 三列
+  # （当时用的一次性脚本 tests/drill_lastseg.py 已随取证结束删除，
+  #   同等信息已固化进 frame_metrics.json）
   ```
 - **预期**：zoom 窗口切段 + concat 不改变该段的帧数与时间跨度
 - **实际**（TEST-A，25fps 源，第 5 段，逐 label 真实计帧）
@@ -262,3 +266,95 @@
 5. B2–B9 定向确证与修复
 6. `run_ffmpeg()` 记录 start_time/end_time（第 18 条尚未落地，现记录 command/return_code/elapsed/stderr）
 7. `timeline_metrics.json` 目前未单独产出（帧/时长量已在 `frame_metrics.json` + `audio_metrics.json`）
+
+> 上述 1–7 已在 V5 阶段全部完成或转为明确结论，详见 `PARAMETER_CALIBRATION_REPORT_V5.md`。以下为 V5 阶段追加内容，**历史内容不改写**。
+
+## V5 阶段追加：降级路径与编码参数新发现（2026-08-23）
+
+取证脚本：`tests/param_forensics_v5.py fallback|encode`（真实 `process_segmented` / `process_clip` / `_merge_reencode`）。
+
+### B15【P0，V5 新发现并修复】降级路径直接崩溃：`build_command` 引用未定义的 `seg_total`
+
+- 位置：`video_rewash/video/video_processor.py:114`
+- 现象：`NameError: name 'seg_total' is not defined` —— B14（淡入淡出只加首尾段）给 `process_clip` 加了 `seg_total` 形参，但没传进 `build_command`。
+- 影响：**只要单进程路径失败触发降级，处理立即异常退出**（`process_segmented` 第一段就抛）。
+- 修复：`build_command(..., seg_total=1)` 形参 + 两处调用点透传。
+- 修复后：3 段降级渲染全部成功（`fallback/DEGRADED/commands.txt` 共 4 条命令 = 3 段 + 1 合并）。
+
+### B16【P0，V5 新发现并修复】`-t` 放在 `-i` 之后 → 输出侧限时，吞掉时间轴膨胀
+
+- 位置：`video_rewash/video/video_processor.py:69-76`（修复前 `-t` 在 `-i` 之后）
+- 判据与实测：
+  - 段 1 台账预测 3.900s / 117 帧，实际输出 **3.767s / 113 帧**（= `-t` 值，正好被截断）
+  - 段 2 预测 3.833s / 115 帧 → 实际 **3.767s / 113 帧**
+  - 整文件模式同样受影响（frame_dup=3 的 +3 帧膨胀被吞）
+- 根因：FFmpeg 中 `-t` 在最后一个 `-i` 之后即为**输出**时长上限；`reverse_loop` 循环增量、`frame_dup`、慢放都会让输出比输入窗口长，于是被硬截。
+- 修复：`-t` 移到 `-i` 之前（输入侧限时），语义与单进程路径的 `trim=start:end` 一致。
+- 修复后：段 1/2/3 输出帧数与台账预测**逐段相等**，两条路径总帧数 349/349、时长 11.6333s/11.6333s。
+
+### B17【P1，V5 新发现并修复】降级路径第 0 段丢失 `reverse_loop` 事件
+
+- 位置：`video_processor.py:81`（`if seg_idx == 0 and p.get("rl_mode")` 把段级 rl 计划清空）+ `use_complex` / 音频分支里的 `seg_idx > 0` 判断
+- 现象：`seg_idx == 0` 被当作「整文件模式」，于是降级路径的第 0 段既拿不到快照级 rl（要求 `in_duration is None`），也拿不到段级 rl → 该段完全没有倒放循环。单进程路径的 i=0 是有的。
+- 实测：`fallback/DEGRADED/commands.txt` cmd0 无 `split=3 … concat=n=5` 结构，108 帧；单进程同段 117 帧。
+- 修复：改用 `seg_mode = in_duration is not None` 区分整文件/分段，三处判断同步。
+- 修复后：三段 rl 结构一致，帧数与台账一致。
+
+### B18【P2，V5 新发现并修复】降级路径镜头畸变事件只落在第 0 段
+
+- 位置：`video_processor.py`（修复前 `lens_events = … if seg_idx == 0 else []`）
+- 实测：cmd0 有 `lenscorrection=…`，cmd1/cmd2 完全没有 → 同一条视频里只有前 1/3 有畸变。单进程路径在 A 层对全片生效。
+- 修复：去掉 `seg_idx == 0` 限制，每段按自身段快照规划畸变事件（与 rotate/zoom/抽帧的段级随机口径一致）。
+- 残留说明：两条路径的**窗口位置**仍不同（段快照 seed 不同，属设计），但「是否有畸变」不再随段号丢失。
+
+### B19【P1，V5 新发现并修复】整文件模式 `seg_dur` 未减 `trim_tail` → 音频比视频长 trim_tail
+
+- 位置：`video_processor.py`（修复前 `seg_dur = in_duration if in_duration else max(1.0, total_dur - start)`）
+- 现象：`-t` 已按 `avail - trim_tail` 限时，但时间轴真值 `seg_dur` 仍按 `total-start` 算 → `met["out_dur"]` 多 `trim_tail`，音频 `apad=whole_dur` 把音轨补到 11.7s，而视频只有 11.4s。
+- 实测（trim_tail=0.3s，frame_dup=3）：视频 342 帧 = 11.400s，容器时长 **11.700s**，`|a−v| = 0.300s = trim_tail`。
+- 说明：B16 修复前这条被掩盖（输出侧 `-t` 把音视频一起截了），B16 修复后暴露。
+- 修复：`seg_dur = 实际读入窗口`（= `-t` 值），与 `process_clip` 的 `expect_dur` 口径统一。
+- 修复后：预测 11.400s / 342 帧，实测 11.400s / 342 帧，Δ=0.000s。
+
+### B9【P2，V5 修复并确证】`sc_threshold` 生成但主路径不传
+
+- 位置：`video_rewash/video/filters.py` `spec_encode_args` libx264 分支（旧代码只有 `build_encode_args` 传 `-sc_threshold`）
+- 修复：libx264 分支补 `-sc_threshold`。
+- 确证（素材 V-PULSE 含硬切白闪，`-g 250` 让周期关键帧几乎不出现）：
+  - `sc_threshold=0` → 关键帧 **2** 个，位置 [0, 250]
+  - `sc_threshold=60` → 关键帧 **7** 个，位置 [0, 30, 90, 150, 210, 270, 330]（正对白闪时刻）
+- 结论：由 INEFFECTIVE 转 **PASS**（判据取自编码器实际输出，不是命令行）。
+
+### B20【P3，V5 新发现并修复】日志硬编码 44100 与实际不符
+
+- 位置：`video_rewash/core/randomizer.py:349`，日志打印 `asetrate={int(44100*rate)}`，而实际滤镜用素材真实采样率（`filters.py:500`，48k 素材即 48000×rate）。
+- 修复：日志改为 `asetrate=round(sr_in*rate)` 并注明 `sr_in` 为素材真实采样率。产品行为无变化（纯日志一致性）。
+
+### B2【P1，V5 修复】rl 事件长度按 `normalize.fps` 量化，却当支路输入时长用
+
+- 位置：`randomizer.py:518-528`（量化）vs `_graph.py` rl 切拼（消费）
+- 修复：`generate_segment_plan(..., grid_fps=branch_fps)`，按**进入支路的真实帧率**量化；三处调用点（`segment.process_single_pass`、`video_processor.build_command`、`video_processor.process_clip`）与取证参照模型同步传入。
+- 反证（旧口径的实际危害）：固定 `grid=normalize.fps=30`、支路 25fps 时扫 40 个 seed，**35 个** `seg_len × 25` 不是整数（如 0.133333s × 25 = 3.33 帧）→ 视频侧必须落整帧、音频侧不受限，两侧增量不等。
+- 修复后：25 / 29.97 / 30 / 50 / 60 / 120 六种支路帧率的 `seg_len × branch_fps` 全为整数（4 / 4 / 4 / 7 / 9 / 18 帧）。证据：`tests/evidence/source_scan/B2_B3/result.json`
+- 回归：fps 矩阵 8 素材全 PASS，C4 最坏 `|a−v|` 与 C5 补帧数与修复前同（此前该误差已被 `win_len` 对齐吸收，所以数值上看不出改善，本次修的是根因）。
+
+### B3【P2，V5 修复】整文件/降级路径畸变事件按输出时间轴规划
+
+- 位置：`video_processor.py`（修复前 `plan_lens_events(snap, config, seg_dur / speed)`）
+- 原理：`lenscorrection` 在公共链里，位于 `setpts=1/speed*PTS` **之前** → `enable='between(t,…)'` 的 `t` 是输入时间轴。用 `seg_dur/speed` 规划时，`speed>1` 会把窗口全压到前段，`speed<1` 会越界。
+- 实测（30s 素材 / speed=1.25）：修复前窗口上限只能到 24.0s（后 20% 永远没有畸变）；修复后窗口 [0,29.9]、[15,29.9]、[0.115,18.995]，末端 29.9s ≤ 输入窗口 30.0s。
+- 修复：`plan_lens_events(snap, config, seg_dur)`（单进程路径本来就用源时长，口径统一）。
+
+### B5【P2，V5 修复】变调采样率未知时静默回退 44100
+
+- 位置：`filters.py:495-513`
+- 修复前：`sr = … else 44100` → 48k 素材上 `asetrate=44100*rate` + `aresample=44100`，等于额外 ×(48000/44100) 变速且输出被重采样到 44100（V4 实测 +9.0345% 时长膨胀，音高也是错的），而且**完全静默**。
+- 修复：采样率未知（0/None/异常）时**不生成变调链**，宁可少一个扰动参数也不悄悄改速度/音高。
+- 实测：`sample_rate=48000` → `asetrate=60476,aresample=48000,atempo=0.793701`；`sample_rate=0`/`None` → 空链。证据：`tests/evidence/source_scan/B5/result.json`
+- 回归：`param_forensics_v5.py audio` 11/11 PASS（A3 ±4 半音仍为 1261Hz / 798Hz，已知采样率路径逐字未变）。
+
+### 仍为 INEFFECTIVE（设计取舍，需产品决策，未改代码）
+
+- **B8 CRF 下限钳制 24**：`spec_encode_args` 里 `crf = max(24, …)`。实测 crf=19 与 crf=24 输出**字节数完全相同**（545460 / 545460）→ 预设区间里 <24 的取值全部无效。该钳制是为体积对齐刻意加的（qp17 实测 ≈11Mbps），要不要放开属产品决策，本轮不擅自改。
+- **`frame_drop_on`**：`randomizer` 生成但渲染链从未引用（抽帧由 `video.frame_drop.enable/probability` + 段计划驱动）。源码级确认为死参数，涉及 GUI 展示，未删。
+
