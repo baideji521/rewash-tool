@@ -311,3 +311,29 @@ git diff --stat 08062c6 a828758 → 仅 PARAMETER_CALIBRATION_REPORT_V2.md（+50
   `PARAMETER_MASTER_AUDIT.md`；结论见 `PARAMETER_CALIBRATION_REPORT_V6.md`
   与 `PARAMETER_BUG_REPORT_V5.md`。
 
+## 状态刷新（V7 最终闭环审计）
+
+本阶段把参数矩阵从"抽样 + 组合"扩展为 **44 参数逐项隔离 + 19 组合 + FPS×采样率 12 组合
++ 6 类奇异素材 + 三生产路径对照**，全部以真实 FFmpeg 执行 + ffprobe/帧数/SHA 为证据。
+
+- 新增常驻取证入口：`param_forensics_v7.py sweep|combo19|fpsmat|weird|paths3|segacc|
+  determ|rotphase|wholerl|encoder|qc`
+- 一键完整回归扩到 19 套件：`python tests/unattended.py`（新增 v7_paths3 / v7_sweep /
+  v7_combo19 / v7_material / v7_determ）
+- 参数级判据升级（§三 反自证自洽）：
+  - 命令内未出现 → BUG；出现但输出逐字节相同 → INEFFECTIVE；
+    覆盖值与基线快照或出厂配置相同 → **EVIDENCE_INSUFFICIENT**（用例缺陷，不作产品结论）
+  - 无覆盖的结构性条目（concat / setsar / atrim+apad）只判"结构是否真实出现在命令里"
+  - 测试不得抄写产品公式：`effective_duration` 等一律调用产品函数；
+    `test_timeline_integrity` 的口径一致性改为"函数对象同一性 + 切点不越界"断言
+- 44 项参数最新结果（RUN-000043）：**44/44 PASS，崩溃阶段 0**
+- 出厂配置下判定为 INEFFECTIVE / PARTIAL 的项（非缺陷，已注明原因）：
+  `noise`、`channel_mix`、`mask_drift_*`（config 出厂关闭）；
+  `sc_threshold`（仅 CPU 编码器分支，NVENC 无该选项）；
+  `asym_crop_*`（仅标准化开启时生效）；快照级 `rl_*`（仅整文件路径读取）
+- 本阶段 Bug：B35~B49 共 15 条（含 8 条 TEST_INFRA），全部 FIXED；
+  P0 两条：B37（整文件 plan rl → |a-v| +0.333s）、B39/B49（三路径帧数不一致）
+- 三路径对照（RUN-000046）：A 单进程 330 帧 == 台账 330；B 分段 331（Δ=1，容差 ±2，
+  残差在 `_merge_reencode` 合并遍）；C 整文件 325（构成不同，按各自台账校验）
+- 详细结论见 `PARAMETER_CALIBRATION_REPORT_V7.md` 与 `PARAMETER_BUG_REPORT_V6.md`。
+
