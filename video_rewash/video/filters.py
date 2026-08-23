@@ -4,43 +4,32 @@
 把参数快照翻译成 FFmpeg filtergraph。纯字符串构建，不执行命令，
 便于测试与调试（打印即可审查完整滤镜链）。
 
-流水线顺序固定（最终改造方案）：
-  时序（trim/-ss → reverse/loop → 抽帧 → 变速）→
-  空间（黑边裁剪 → 画布缩放到目标分辨率 → scale 等效推近 → 推镜/旋转漂移/
-        镜头畸变）→ 颜色（亮度/对比度/饱和度合并单个 eq + hue）→
-  纹理（噪点）→ 最终编码（只编一次）。
-性能优化（肉眼视觉基本无差异）：重滤镜（zoompan/rotate/lenscorrection/noise）
-先缩到目标画布分辨率再执行，像素量大幅下降；允许插值/旋转边缘/噪点的
-细微差异，禁止变形/黑边/比例变化。
-本模块只负责 空间/颜色/纹理 与 geq 扰动表达式；
--ss/-t 裁剪与变速 setpts 由 video_processor 拼接。
-
-观感安全设计（用户审查要求）：
-- 动态渐变幅度小、周期长 → 无晕眩感
-- 重复帧只插 0~4 帧 → 节奏影响可忽略（且输出过质检）
-- v7.1：静态 rotate 已删除（与 rotate_drift 动态微旋功能重叠）
+v8.1 全片预处理 + 分段动态扰动（三层结构）：
+  A 全片级（整条视频只随机一次）：
+      黑边裁剪 → 非对称裁剪/画布缩放 → scale 推近/拉远 → 颜色（eq/hue）
+  B 分段级（每段独立随机）：
+      推镜/微旋/抽帧/倒放循环 的段内参数
+  C 时间事件（时间轴窗口出现）：
+      镜头畸变（全片窗口，timeline enable）/ 推镜窗口（切段直通+拼接，
+      zoompan 无 timeline 支持）/ 微旋窗口（timeline enable，窗口外零开销）
+主路径：一次解码 → 一个 filter_complex → 一次 NVENC，不产生中间编码。
 """
 import math
 
 from ..core.config import config_get
 
 
-def build_spatial_chain(snap: dict, width: int, height: int,
-                        fps: float = 25.0, norm_spec: dict = None,
-                        crop_rect: tuple = None, config: dict = None) -> str:
-    """
-    构建空间→颜色→纹理滤镜链（性能优化版：目标分辨率优先）。
-    有 norm_spec 时：黑边裁剪 → 画布缩放到目标分辨率（含非对称裁剪分支）
-    → scale 参数居中推近等效 → 重滤镜（推镜/微旋/畸变）→ 颜色 → 噪点。
-    无 norm_spec（标准化关闭）：退回旧链（源分辨率缩放 + 重滤镜）。
-    width/height: 原始视频尺寸；fps: 用于时间表达式。
-    crop_rect: 黑边检测矩形 (w, h, x, y)，None=不裁剪；裁剪始终在缩放前。
-    返回逗号连接的滤镜串。
-    """
+# ──────────────────────────────────────────────────────────────
+#  A 层：全片级几何与颜色
+# ──────────────────────────────────────────────────────────────
+
+def build_geom_chain(snap: dict, width: int, height: int,
+                     norm_spec: dict = None, crop_rect: tuple = None) -> tuple:
+    """A 层几何链（全片级）：黑边裁剪 → 画布缩放到目标分辨率（含非对称裁剪）
+    → scale 参数居中推近/拉远。返回 (滤镜串, tw, th)，tw/th 为画布尺寸
+    （无 norm_spec 时为缩放后源分辨率尺寸，偶数对齐）。"""
     p = snap.get("params", {})
     filters = []
-
-    # ── 空间：黑边裁剪（在缩放前，避免先放大再裁剪的额外计算）──
     if crop_rect:
         cw, ch, cx, cy = crop_rect
         if cw > 0 and ch > 0:
@@ -55,8 +44,6 @@ def build_spatial_chain(snap: dict, width: int, height: int,
         tw -= tw % 2
         th -= th % 2
 
-    if norm_spec:
-        # ── 画布：先缩放到目标分辨率（重滤镜之后都在此分辨率执行）──
         # 非对称构图裁剪：scale 覆盖目标 → crop 裁到目标尺寸（位置按左右/上下比例偏移）
         cl = float(p.get("asym_crop_l", 0.0))
         cr = float(p.get("asym_crop_r", 0.0))
@@ -76,13 +63,12 @@ def build_spatial_chain(snap: dict, width: int, height: int,
                 f"scale={tw}:{th}:force_original_aspect_ratio=decrease:flags=bicubic,"
                 f"pad={tw}:{th}:(ow-iw)/2:(oh-ih)/2:color=black")
 
-        # ── scale 参数等效：目标分辨率上推近→居中裁剪，拉远→黑边 pad ──
+        # scale 参数等效：目标分辨率上推近→居中裁剪，拉远→黑边 pad
         # （显式整数尺寸：swscale 对表达式四舍五入不可控，可能越界）
         if scale_base > 1.003:
             sw = max(tw, int(round(tw * scale_base)) // 2 * 2)
             sh = max(th, int(round(th * scale_base)) // 2 * 2)
-            filters.append(
-                f"scale={sw}:{sh}:flags=bicubic,crop={tw}:{th}")
+            filters.append(f"scale={sw}:{sh}:flags=bicubic,crop={tw}:{th}")
         elif scale_base < 0.997:
             sw = min(tw, max(2, int(round(tw * scale_base)) // 2 * 2))
             sh = min(th, max(2, int(round(th * scale_base)) // 2 * 2))
@@ -90,57 +76,19 @@ def build_spatial_chain(snap: dict, width: int, height: int,
                 f"scale={sw}:{sh}:flags=bicubic,"
                 f"pad={tw}:{th}:(ow-iw)/2:(oh-ih)/2:color=black")
     else:
-        # ── 标准化关闭：退回旧链（源分辨率缩放，2 的倍数保证 yuv420p）──
+        # 标准化关闭：源分辨率缩放（2 的倍数保证 yuv420p）
         tw = int(width * scale_base / 2) * 2
         th = int(height * scale_base / 2) * 2
         filters.append(f"scale={tw}:{th}:flags=bicubic")
+    return ",".join(filters), tw, th
 
-    # 镜头微运动：周期性推镜渐变（空间阶段）
-    # 注：此 build 的 crop 无 eval 参数且 init 时无法求值含 t 的表达式，
-    # 改用 zoompan（支持 in 帧号变量，probe 已验证可用）
-    z_amp = float(p.get("zoom_drift_amp", 0.0))
-    z_period = max(1.0, float(p.get("zoom_drift_period", 4.0)))
-    if z_amp > 0.002:
-        period_frames = max(2, int(z_period * fps))
-        # in 为输入帧号；mod 内逗号需转义
-        if p.get("zoom_drift_dir") == "in":
-            z_expr = f"1+{z_amp:.4f}*mod(in\\,{period_frames})/{period_frames}"
-        else:
-            z_expr = f"1+{z_amp:.4f}*(1-mod(in\\,{period_frames})/{period_frames})"
-        filters.append(
-            f"zoompan=z='{z_expr}':d=1"
-            f":x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
-            f":s={tw}x{th}:fps={fps:.3f}"
-        )
 
-    # 动态微旋：正弦角度渐变 + 单向恒速漂移（空间阶段）
-    # 随机初始相位 → 每段/每次从不同角度起步，呈现自然摄像机漂移
-    r_amp = float(p.get("rotate_drift_amp", 0.0))
-    r_period = max(1.0, float(p.get("rotate_drift_period", 8.0)))
-    r_speed = float(p.get("rotate_drift_speed", 0.0))
-    r_phase = float(p.get("rotate_drift_phase", 0.0))
-    if r_amp > 0.05 or abs(r_speed) > 0.005:
-        # sin(2π*t/T + φ) 随机相位 + 线性漂移
-        sin_part = f"{r_amp:.3f}*{math.pi / 180:.6f}*sin(2*PI*t/{r_period:.2f}+{r_phase:.4f})" if r_amp > 0.05 else "0"
-        spd_part = f"+{r_speed:.4f}*{math.pi / 180:.6f}*t" if abs(r_speed) > 0.005 else ""
-        angle_expr = f"({sin_part}{spd_part})"
-        filters.append(
-            f"rotate={angle_expr}"
-            f":fillcolor=none"
-        )
-
-    # ── 空间：极轻镜头畸变（lenscorrection）──
-    lk1 = float(p.get("lens_k1", 0.0))
-    lk2 = float(p.get("lens_k2", 0.0))
-    if abs(lk1) > 0.0001 or abs(lk2) > 0.0001:
-        lcx = float(p.get("lens_cx", 0.5))
-        lcy = float(p.get("lens_cy", 0.5))
-        filters.append(
-            f"lenscorrection=cx={lcx:.3f}:cy={lcy:.3f}"
-            f":k1={lk1:.5f}:k2={lk2:.5f}"
-        )
-
-    # ── 颜色：亮度/对比度/饱和度合并单个 eq，避免重复 eq 滤镜 ──
+def build_color_chain(snap: dict, config: dict = None) -> str:
+    """A 层颜色/纹理链（全片级）：亮度/对比度/饱和度合并单个 eq + hue
+    （+可选减法项 通道混合/噪点，默认关，不进普通 GUI）。
+    返回逗号连接滤镜串（可空）。"""
+    p = snap.get("params", {})
+    filters = []
     eq_parts = []
     b = float(p.get("brightness", 0.0))
     c = float(p.get("contrast", 0.0))
@@ -172,9 +120,6 @@ def build_spatial_chain(snap: dict, width: int, height: int,
             f"br={a:.4f}:bg=0:bb={1 - a:.4f}"
         )
 
-    # ── 纹理：噪点（唯一噪声手段）──
-    # 性能减法开关：配置 video.noise.enable 可开启（默认关，不进普通 GUI）；
-    # 实测 10s 片段省 0.81s，指纹贡献仅 0.009，收益/耗时比最差
     noise = float(p.get("noise", 0.0))
     noise_cfg = ((config or {}).get("video") or {}).get("noise") or {}
     if noise > 0.1 and noise_cfg.get("enable", False):
@@ -182,6 +127,159 @@ def build_spatial_chain(snap: dict, width: int, height: int,
         filters.append(f"noise=alls={ns}:allf=t+u")
 
     return ",".join(filters)
+
+
+# ──────────────────────────────────────────────────────────────
+#  B/C 层：推镜（窗口化）
+# ──────────────────────────────────────────────────────────────
+
+def build_zoompan_expr(p: dict, fps: float) -> str:
+    """推镜 zoompan z 表达式（周期性推近/拉远，in 为片段内帧号）"""
+    z_amp = float(p.get("zoom_drift_amp", 0.0))
+    z_period = max(1.0, float(p.get("zoom_drift_period", 4.0)))
+    period_frames = max(2, int(z_period * fps))
+    # mod 内逗号需转义
+    if p.get("zoom_drift_dir") == "in":
+        return f"1+{z_amp:.4f}*mod(in\\,{period_frames})/{period_frames}"
+    return f"1+{z_amp:.4f}*(1-mod(in\\,{period_frames})/{period_frames})"
+
+
+def build_zoompan_filter(p: dict, fps: float, tw: int, th: int) -> str:
+    """全长推镜（降级/兼容路径；新主路径用 build_zoom_window_complex 窗口化）"""
+    z_amp = float(p.get("zoom_drift_amp", 0.0))
+    if z_amp <= 0.002:
+        return ""
+    z_expr = build_zoompan_expr(p, fps)
+    return (f"zoompan=z='{z_expr}':d=1"
+            f":x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
+            f":s={tw}x{th}:fps={fps:.3f}")
+
+
+def build_zoom_window_complex(src_label: str, zwin: dict, p: dict,
+                              fps: float, tw: int, th: int,
+                              suffix: str = "") -> tuple:
+    """推镜时间窗口（C 层）：按窗口切段，仅窗口段过 zoompan，其余直通，
+    concat 拼回 → 推镜只在窗口内发生（zoompan 无 timeline 支持，故用切段）。
+    返回 (fc_parts 列表, 输出 label)；未触发返回 ([], src_label)。"""
+    if not zwin or not zwin.get("on"):
+        return [], src_label
+    a = float(zwin.get("start", 0.0))
+    d = float(zwin.get("dur", 0.0))
+    z_amp = float(p.get("zoom_drift_amp", 0.0))
+    if z_amp <= 0.002 or d < 0.3:
+        return [], src_label
+    b = a + d
+    z_expr = build_zoompan_expr(p, fps)
+    sfx = suffix
+    parts, ins = [], []
+    n_split = 2 if a <= 0.05 else 3
+    parts.append(f"{src_label}split={n_split}" +
+                 "".join(f"[zs{k}{sfx}]" for k in range(n_split)))
+    idx = 0
+    if a > 0.05:
+        parts.append(f"[zs{idx}{sfx}]trim=duration={a:.3f},"
+                     f"setpts=PTS-STARTPTS[zA{sfx}]")
+        ins.append(f"[zA{sfx}]")
+        idx += 1
+    parts.append(f"[zs{idx}{sfx}]trim=start={a:.3f}:duration={d:.3f},"
+                 f"setpts=PTS-STARTPTS,"
+                 f"zoompan=z='{z_expr}':d=1"
+                 f":x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
+                 f":s={tw}x{th}:fps={fps:.3f}[zB{sfx}]")
+    ins.append(f"[zB{sfx}]")
+    idx += 1
+    parts.append(f"[zs{idx}{sfx}]trim=start={b:.3f},"
+                 f"setpts=PTS-STARTPTS[zC{sfx}]")
+    ins.append(f"[zC{sfx}]")
+    out = f"[zout{sfx}]"
+    parts.append("".join(ins) + f"concat=n={len(ins)}:v=1:a=0{out}")
+    return parts, out
+
+
+# ──────────────────────────────────────────────────────────────
+#  B/C 层：微旋（窗口化）
+# ──────────────────────────────────────────────────────────────
+
+def build_rotate_filter(p: dict, enable_expr: str = None) -> str:
+    """动态微旋（正弦角度渐变 + 单向恒速漂移）。
+    enable_expr 非空时仅窗口内生效（rotate 支持 timeline，窗口外零开销）。
+    窗口内时间基准由调用方保证（先 setpts 归零再进窗口）。未启用返回空串。"""
+    r_amp = float(p.get("rotate_drift_amp", 0.0))
+    r_period = max(1.0, float(p.get("rotate_drift_period", 8.0)))
+    r_speed = float(p.get("rotate_drift_speed", 0.0))
+    r_phase = float(p.get("rotate_drift_phase", 0.0))
+    if not (r_amp > 0.05 or abs(r_speed) > 0.005):
+        return ""
+    sin_part = f"{r_amp:.3f}*{math.pi / 180:.6f}*sin(2*PI*t/{r_period:.2f}+{r_phase:.4f})" if r_amp > 0.05 else "0"
+    spd_part = f"+{r_speed:.4f}*{math.pi / 180:.6f}*t" if abs(r_speed) > 0.005 else ""
+    angle_expr = f"({sin_part}{spd_part})"
+    f = f"rotate={angle_expr}:fillcolor=none"
+    if enable_expr:
+        f += f":enable='{enable_expr}'"
+    return f
+
+
+# ──────────────────────────────────────────────────────────────
+#  C 层：镜头畸变（全片参数一次随机，事件窗口出现）
+# ──────────────────────────────────────────────────────────────
+
+def build_lens_enable_expr(events: list, t0: float = 0.0,
+                           t1: float = None) -> str:
+    """绝对时间事件窗口 → timeline enable 表达式（裁剪到 [t0,t1] 并转相对时间）。
+    无有效窗口返回 None。"""
+    if not events:
+        return None
+    parts = []
+    for ev in events:
+        try:
+            a, b = float(ev[0]), float(ev[1])
+        except (TypeError, ValueError, IndexError):
+            continue
+        a2 = max(a, t0)
+        b2 = min(b, t1) if t1 is not None else b
+        if b2 - a2 < 0.05:
+            continue
+        parts.append(f"between(t,{a2 - t0:.3f},{b2 - t0:.3f})")
+    return "+".join(parts) if parts else None
+
+
+def build_lens_filter(p: dict, enable_expr: str = None) -> str:
+    """镜头畸变（lenscorrection，支持 timeline）。enable_expr 非空时仅事件窗口
+    内执行，窗口外完全跳过（lenscorrection 重，窗口化是主要性能手段）。"""
+    lk1 = float(p.get("lens_k1", 0.0))
+    lk2 = float(p.get("lens_k2", 0.0))
+    if abs(lk1) <= 0.0001 and abs(lk2) <= 0.0001:
+        return ""
+    lcx = float(p.get("lens_cx", 0.5))
+    lcy = float(p.get("lens_cy", 0.5))
+    f = (f"lenscorrection=cx={lcx:.3f}:cy={lcy:.3f}"
+         f":k1={lk1:.5f}:k2={lk2:.5f}")
+    if enable_expr:
+        f += f":enable='{enable_expr}'"
+    return f
+
+
+def build_spatial_chain(snap: dict, width: int, height: int,
+                        fps: float = 25.0, norm_spec: dict = None,
+                        crop_rect: tuple = None, config: dict = None) -> str:
+    """降级/兼容路径：A 层几何 + 全长推镜/微旋/畸变 + 颜色（整段作用，无窗口）。
+    新主路径（单进程 filtergraph）用上述拆分 builder 组装窗口化链路。"""
+    p = snap.get("params", {})
+    geom, tw, th = build_geom_chain(snap, width, height, norm_spec, crop_rect)
+    parts = [geom]
+    zp = build_zoompan_filter(p, fps, tw, th)
+    if zp:
+        parts.append(zp)
+    rot = build_rotate_filter(p)
+    if rot:
+        parts.append(rot)
+    lens = build_lens_filter(p)
+    if lens:
+        parts.append(lens)
+    color = build_color_chain(snap, config)
+    if color:
+        parts.append(color)
+    return ",".join(x for x in parts if x)
 
 
 def build_geq_filter(snap: dict, tw: int, th: int) -> str:
@@ -221,13 +319,15 @@ def build_geq_filter(snap: dict, tw: int, th: int) -> str:
 # ──────────────────────────────────────────────────────────────
 
 def build_reverse_loop_complex(snap: dict, seg_dur: float, has_audio: bool,
-                               src_v: str = "0:v", src_a: str = "0:a") -> tuple:
+                               src_v: str = "0:v", src_a: str = "0:a",
+                               suffix: str = "") -> tuple:
     """
     真片段倒放/循环（修复旧版只拼一次的问题）：
       reverse → A + 反转(B) + C（音视频同步倒放）
       loop    → A + B + B(+B) + C（B 真正被重复，次数由 rl_repeats 定）
     音视频用完全相同的切点三段拼接，不产生不同步；
     全部在最终滤镜图内完成，不产生中间编码。
+    suffix: 标签后缀（分段模式多段并存时防标签碰撞）。
     返回 (fc_str, v_out_label, a_out_label)；未触发返回 (None, src_v, src_a)。
     """
     p = snap.get("params", {})
@@ -240,53 +340,56 @@ def build_reverse_loop_complex(snap: dict, seg_dur: float, has_audio: bool,
     t2 = min(t1 + d, seg_dur - 0.05)
     if t2 - t1 < 0.05:
         return None, src_v, src_a
+    sfx = suffix
 
     n_rep = int(p.get("rl_repeats", 2)) if mode == "loop" else 1
     n_rep = max(1, min(3, n_rep))
 
     parts = [
-        f"[{src_v}]split=3[r1][r2][r3]",
-        f"[r1]trim=end={t1:.3f},setpts=PTS-STARTPTS[vA]",
-        f"[r2]trim=start={t1:.3f}:end={t2:.3f},setpts=PTS-STARTPTS"
-        f"{',reverse' if mode == 'reverse' else ''}[vB]",
-        f"[r3]trim=start={t2:.3f},setpts=PTS-STARTPTS[vC]",
+        f"[{src_v}]split=3[r1{sfx}][r2{sfx}][r3{sfx}]",
+        f"[r1{sfx}]trim=end={t1:.3f},setpts=PTS-STARTPTS[vA{sfx}]",
+        f"[r2{sfx}]trim=start={t1:.3f}:end={t2:.3f},setpts=PTS-STARTPTS"
+        f"{',reverse' if mode == 'reverse' else ''}[vB{sfx}]",
+        f"[r3{sfx}]trim=start={t2:.3f},setpts=PTS-STARTPTS[vC{sfx}]",
     ]
     if n_rep > 1:
-        parts.append(f"[vB]split={n_rep}" +
-                     "".join(f"[vb{i}]" for i in range(n_rep)))
-        vin = "[vA]" + "".join(f"[vb{i}]" for i in range(n_rep)) + "[vC]"
-        parts.append(f"{vin}concat=n={n_rep + 2}:v=1:a=0[vt]")
+        parts.append(f"[vB{sfx}]split={n_rep}" +
+                     "".join(f"[vb{i}{sfx}]" for i in range(n_rep)))
+        vin = f"[vA{sfx}]" + "".join(f"[vb{i}{sfx}]" for i in range(n_rep)) + f"[vC{sfx}]"
+        parts.append(f"{vin}concat=n={n_rep + 2}:v=1:a=0[vt{sfx}]")
     else:
-        parts.append("[vA][vB][vC]concat=n=3:v=1:a=0[vt]")
+        parts.append(f"[vA{sfx}][vB{sfx}][vC{sfx}]concat=n=3:v=1:a=0[vt{sfx}]")
 
     a_out = None
     if has_audio:
         parts += [
-            f"[{src_a}]asplit=3[s1][s2][s3]",
-            f"[s1]atrim=end={t1:.3f},asetpts=PTS-STARTPTS[aA]",
-            f"[s2]atrim=start={t1:.3f}:end={t2:.3f},asetpts=PTS-STARTPTS"
-            f"{',areverse' if mode == 'reverse' else ''}[aB]",
-            f"[s3]atrim=start={t2:.3f},asetpts=PTS-STARTPTS[aC]",
+            f"[{src_a}]asplit=3[s1{sfx}][s2{sfx}][s3{sfx}]",
+            f"[s1{sfx}]atrim=end={t1:.3f},asetpts=PTS-STARTPTS[aA{sfx}]",
+            f"[s2{sfx}]atrim=start={t1:.3f}:end={t2:.3f},asetpts=PTS-STARTPTS"
+            f"{',areverse' if mode == 'reverse' else ''}[aB{sfx}]",
+            f"[s3{sfx}]atrim=start={t2:.3f},asetpts=PTS-STARTPTS[aC{sfx}]",
         ]
         if n_rep > 1:
-            parts.append(f"[aB]asplit={n_rep}" +
-                         "".join(f"[ab{i}]" for i in range(n_rep)))
-            ain = "[aA]" + "".join(f"[ab{i}]" for i in range(n_rep)) + "[aC]"
-            parts.append(f"{ain}concat=n={n_rep + 2}:v=0:a=1[at]")
+            parts.append(f"[aB{sfx}]asplit={n_rep}" +
+                         "".join(f"[ab{i}{sfx}]" for i in range(n_rep)))
+            ain = f"[aA{sfx}]" + "".join(f"[ab{i}{sfx}]" for i in range(n_rep)) + f"[aC{sfx}]"
+            parts.append(f"{ain}concat=n={n_rep + 2}:v=0:a=1[at{sfx}]")
         else:
-            parts.append("[aA][aB][aC]concat=n=3:v=0:a=1[at]")
-        a_out = "[at]"
-    return ";".join(parts), "[vt]", a_out
+            parts.append(f"[aA{sfx}][aB{sfx}][aC{sfx}]concat=n=3:v=0:a=1[at{sfx}]")
+        a_out = f"[at{sfx}]"
+    return ";".join(parts), f"[vt{sfx}]", a_out
 
 
 # ──────────────────────────────────────────────────────────────
 #  时序扰动：周期性微量抽帧（修复旧版只删 1 帧的问题）
 # ──────────────────────────────────────────────────────────────
 
-def frame_drop_positions(n_frames: int, lo: int, hi: int, rng) -> list:
+def frame_drop_positions(n_frames: int, lo: int, hi: int, rng,
+                         window: tuple = None) -> list:
     """
     每 interval(min~max) 帧随机删 1 帧，然后继续计算下一次间隔：
       第 100~200 帧附近删一帧 → 再加 100~200 帧删下一帧 → …
+    window=(start_frame, end_frame) 非空时只在窗口内删帧（时间事件化）。
     视频太短（不够一个间隔）不删；总量封顶 ≤2% 帧，不影响播放。
     """
     try:
@@ -295,10 +398,21 @@ def frame_drop_positions(n_frames: int, lo: int, hi: int, rng) -> list:
         return []
     if n_frames <= 0 or lo_i < 2 or n_frames < lo_i + 5:
         return []
+    w0 = 0
+    w1 = n_frames - 3
+    if window:
+        try:
+            w0 = max(0, int(window[0]))
+            w1 = min(n_frames - 3, int(window[1]))
+        except (TypeError, ValueError, IndexError):
+            pass
+    if w1 - w0 < lo_i:
+        return []  # 窗口不够一个间隔
     cap = max(1, n_frames // 50)
     drops, nxt = [], rng.randint(lo_i, hi_i)
-    while nxt < n_frames - 3 and len(drops) < cap:
-        drops.append(nxt)
+    while nxt < min(w1, n_frames - 3) and len(drops) < cap:
+        if nxt >= w0:
+            drops.append(nxt)
         nxt += rng.randint(lo_i, hi_i)
     return drops
 
@@ -523,14 +637,14 @@ def spec_encode_args(snap: dict, config: dict, use_nvenc: bool,
     if enc == "libvpx-vp9":
         args = ["-c:v", "libvpx-vp9", "-cpu-used", "4", "-pix_fmt", "yuv420p"]
         if target_kbps:
-            args += ["-b:v", f"{int(target_kbps)}k"]
+            args += ["-b:v", f"{target_kbps}k"]
         else:
             args += ["-b:v", "0", "-crf", str(crf)]
         return args
     # libsvtav1
     args = ["-c:v", "libsvtav1", "-preset", "8", "-pix_fmt", "yuv420p"]
     if target_kbps:
-        args += ["-b:v", f"{int(target_kbps)}k"]
+        args += ["-b:v", f"{target_kbps}k"]
     else:
         args += ["-crf", str(crf)]
     return args

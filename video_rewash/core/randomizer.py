@@ -14,6 +14,17 @@ import math
 import random
 import time
 
+from .config import config_get
+
+# 全片级参数（A 层）：一个视频任务开始时随机一次，分段不重新随机。
+# 分段/降级路径的子快照必须从主快照继承这些键（段间色调/构图连续）。
+GLOBAL_PARAM_KEYS = (
+    "scale", "brightness", "contrast", "saturation", "hue",
+    "channel_mix", "noise",
+    "asym_crop_l", "asym_crop_r", "asym_crop_t", "asym_crop_b",
+    "lens_k1", "lens_k2", "lens_cx", "lens_cy",
+)
+
 
 def _range_of(preset: dict, key: str, d_lo: float, d_hi: float):
     """从预设读 {min,max}，缺失用默认（永不崩溃）"""
@@ -228,10 +239,14 @@ def generate_snapshot(preset: dict, config: dict = None, seed: int = None) -> di
             p["rl_seg_len"] = round(rng.uniform(0.1, 0.2), 3)     # 片段时长(秒)
             p["rl_repeats"] = rng.choice([2, 3])                  # loop 时 B 出现次数（A+B×n+C）
 
-    # 周期性微量抽帧（配置 video.frame_drop）：每 interval 帧随机删 1 帧，
-    # 具体删帧位置由 build 阶段结合总帧数生成（这里只掷启用骰）。
+    # 周期性微量抽帧（配置 video.frame_drop）：按配置概率掷启用骰，
+    # 具体删帧位置与作用窗口由 build 阶段结合总帧数/事件规划生成。
     fd_cfg = (config.get("video") or {}).get("frame_drop") or {}
-    p["frame_drop_on"] = bool(fd_cfg.get("enable", False)) and rng.random() < 0.9
+    try:
+        fd_prob = float(fd_cfg.get("probability", 0.7))
+    except (TypeError, ValueError):
+        fd_prob = 0.7
+    p["frame_drop_on"] = bool(fd_cfg.get("enable", False)) and rng.random() < fd_prob
 
     # ── 音频 ──
     # 音频速度 = 视频速度 × 微偏因子 → 保证音画不漂移；0~0 → 关闭音频微变速（因子 1.0）
@@ -281,3 +296,156 @@ def snapshot_summary(snap: dict) -> str:
         f" speed={p.get('speed')} bright={p.get('brightness')}% "
         f"crf={p.get('crf')} gop={p.get('gop')}"
     )
+
+
+# ────────────────────────────────────────────────────────────
+#  时间事件规划（C 层）：全片/分段的时间窗口生成，仅依赖快照 seed，
+#  确定性可复现；所有新字段都有默认值，旧配置缺字段不崩溃。
+# ────────────────────────────────────────────────────────────
+
+def _num(node: dict, key: str, default):
+    try:
+        v = node.get(key, default) if isinstance(node, dict) else default
+        return float(v)
+    except (TypeError, ValueError):
+        return float(default)
+
+
+def plan_lens_events(snap: dict, config: dict, timeline_len: float,
+                     seed_offset: int = 53) -> list:
+    """镜头疄变事件窗口（全片级：k1/k2/cx/cy 只随机一次，事件按窗口出现）。
+    timeline_len: lens 滤镜所在时间轴的总长（秒）。
+    返回 [[start, end], ...]（绝对秒）；未触发/关闭返回 []。
+    关闭规则：enable=false / probability<=0 / duration 0~0 / count<=0。"""
+    p = snap.get("params", {})
+    lk1 = float(p.get("lens_k1", 0.0))
+    lk2 = float(p.get("lens_k2", 0.0))
+    if abs(lk1) <= 0.0001 and abs(lk2) <= 0.0001:
+        return []  # 参数本身关闭（enable=false 或 GUI k1/k2 置 0）
+    ld = config_get(config, "video.lens_distortion", {}) or {}
+    if not ld.get("enable", False):
+        return []
+    try:
+        timeline_len = float(timeline_len)
+    except (TypeError, ValueError):
+        return []
+    if timeline_len < 2.0:
+        return []
+    prob = _num(ld, "probability", 0.6)
+    if prob <= 0.0:
+        return []
+    rng = random.Random(int(snap.get("seed", 0)) + seed_offset)
+    if rng.random() >= prob:
+        return []
+    dur_node = ld.get("duration", {}) or {}
+    d_lo, d_hi = _num(dur_node, "min", 1.5), _num(dur_node, "max", 4.0)
+    if d_lo > d_hi:
+        d_lo, d_hi = d_hi, d_lo
+    if _zero_pair(d_lo, d_hi) or d_lo <= 0.0:
+        return []  # 0~0 → 关闭
+    cnt_node = ld.get("count", {}) or {}
+    c_lo, c_hi = int(_num(cnt_node, "min", 1)), int(_num(cnt_node, "max", 2))
+    if c_lo > c_hi:
+        c_lo, c_hi = c_hi, c_lo
+    if c_hi <= 0:
+        return []
+    count = rng.randint(max(1, c_lo), c_hi)
+    # 均分 cell 内各放一个窗口 → 不重叠且分布在全片
+    events, cell = [], timeline_len / count
+    for k in range(count):
+        dur = rng.uniform(d_lo, min(d_hi, max(d_lo, cell * 0.8)))
+        lo = cell * k + 0.2
+        hi = cell * (k + 1) - dur - 0.2
+        if hi > lo:
+            start = rng.uniform(lo, hi)
+        else:
+            start = cell * k + max(0.0, (cell - dur) / 2.0)
+        end = min(start + dur, timeline_len - 0.1)
+        if end - start >= 0.3:
+            events.append([round(start, 3), round(end, 3)])
+    return events
+
+
+def generate_segment_plan(snap: dict, config: dict, seg_idx: int,
+                          seg_len: float) -> dict:
+    """单段动态/事件规划（B/C 层）。时间均为段内局部坐标（0 起）。
+    seg_len: 该段在目标时间轴上的长度（变速后空间，与滤镜位置一致）。
+    规则：probability<=0 或 duration 0~0 → 关闭；窗口放不下时收缩/放弃。
+    返回 {"rotate":..,"zoom":..,"frame_drop":..,"reverse_loop":..}。"""
+    seed = int(snap.get("seed", 0)) + seg_idx * 104729
+    rng = random.Random(seed)
+    plan = {
+        "rotate": {"on": False, "start": 0.0, "dur": 0.0},
+        "zoom": {"on": False, "start": 0.0, "dur": 0.0},
+        "frame_drop": {"on": False, "start": 0.0, "dur": 0.0},
+        "reverse_loop": {"mode": None, "pos_rel": 0.5,
+                         "seg_len": 0.15, "repeats": 2},
+    }
+    try:
+        seg_len = float(seg_len)
+    except (TypeError, ValueError):
+        return plan
+    if seg_len < 2.0:
+        return plan
+    vcfg = config_get(config, "video", {}) or {}
+    p = snap.get("params", {})
+
+    def _window(node, d_prob, d_lo, d_hi, pad_default=(0.0, 0.0)):
+        """掷概率骰 + 取时长窗口；0~0 时长或概率<=0 → None（关闭）"""
+        node = node or {}
+        prob = _num(node, "probability", d_prob)
+        dur_node = node.get("duration", {}) or {}
+        lo, hi = _num(dur_node, "min", d_lo), _num(dur_node, "max", d_hi)
+        if lo > hi:
+            lo, hi = hi, lo
+        if prob <= 0.0 or _zero_pair(lo, hi) or lo <= 0.0:
+            return None
+        if rng.random() >= prob:
+            return None
+        dur = rng.uniform(lo, hi)
+        pad = 0.0
+        if pad_default[0] > 0 or pad_default[1] > 0:
+            pn = node.get("pause", {}) or {}
+            plo, phi = _num(pn, "min", pad_default[0]), _num(pn, "max", pad_default[1])
+            pad = rng.uniform(min(plo, phi), max(plo, phi))
+        if dur + 2 * pad > seg_len - 0.4:
+            dur = seg_len - 0.4 - 2 * pad  # 放不下 → 收缩时长（保事件发生）
+        if dur < 0.5:
+            return None
+        start = rng.uniform(pad, max(pad, seg_len - dur - pad))
+        return {"on": True, "start": round(start, 3), "dur": round(dur, 3)}
+
+    # 微旋窗口（幅度/速度已在快照中逐段随机；窗口只在段内部分时间生效）
+    r_active = (float(p.get("rotate_drift_amp", 0.0)) > 0.05
+                or abs(float(p.get("rotate_drift_speed", 0.0))) > 0.005)
+    if r_active:
+        w = _window(vcfg.get("rotate_drift"), 0.8, 3.0, 8.0)
+        if w:
+            plan["rotate"] = w
+
+    # 推镜窗口（含前后留白 pause）
+    if float(p.get("zoom_drift_amp", 0.0)) > 0.002:
+        w = _window(vcfg.get("zoom_drift"), 0.8, 3.0, 8.0, (1.0, 4.0))
+        if w:
+            plan["zoom"] = w
+
+    # 抽帧窗口（启用骰已在快照 frame_drop_on；此处只定作用窗口）
+    if p.get("frame_drop_on"):
+        w = _window(vcfg.get("frame_drop"), 1.0, 2.0, 5.0)
+        if w:
+            plan["frame_drop"] = w
+
+    # 倒放/循环事件（短窗口，不改整段）
+    rl = vcfg.get("reverse_loop") or {}
+    if rl.get("enable", False):
+        prob = _num(rl, "probability", 0.4)
+        if prob > 0.0 and rng.random() < prob:
+            el = rl.get("event_length", {}) or {}
+            elo, ehi = _num(el, "min", 0.1), _num(el, "max", 0.2)
+            plan["reverse_loop"] = {
+                "mode": rng.choice(["reverse", "loop"]),
+                "pos_rel": round(rng.uniform(0.15, 0.85), 4),
+                "seg_len": round(rng.uniform(min(elo, ehi), max(elo, ehi)), 3),
+                "repeats": rng.choice([2, 3]),
+            }
+    return plan

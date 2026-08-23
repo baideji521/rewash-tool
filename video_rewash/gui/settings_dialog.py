@@ -264,12 +264,20 @@ class SettingsDialog(QDialog):
                        rd_node.get("speed_min", 0.02), rd_node.get("speed_max", 0.08))
             _range_row("微旋周期(s)", "rotate_drift_period", None,
                        rd_node.get("period_min", 3.0), rd_node.get("period_max", 6.0))
+        # 微旋事件窗口（分段级：概率 + 窗口时长；时长 0~0 → 关闭窗口化）
+        self._rdw_prob, self._rdw_lo, self._rdw_hi = self._event_row(
+            grid, row, "微旋窗口(概率/时长s)", u, "rdw", 0.8, 3.0, 8.0)
+        row += 1
 
         # 推镜（zoompan 渐变）
         zd_node = params.get("zoom_drift") or {}
         if isinstance(zd_node, dict):
             _range_row("推镜幅度 ±", "zoom_drift", None,
                        zd_node.get("amp_min", 0.01), zd_node.get("amp_max", 0.03))
+        # 推镜事件窗口（概率 + 窗口时长；前后留白用配置默认 1~4s）
+        self._zdw_prob, self._zdw_lo, self._zdw_hi = self._event_row(
+            grid, row, "推镜窗口(概率/时长s)", u, "zdw", 0.8, 3.0, 8.0)
+        row += 1
 
         # 镜头畸变（lenscorrection；配置 video.lens_distortion，单值 0=关闭）
         grid.addWidget(QLabel("镜头畸变 k1 ±"), row, 0)
@@ -286,6 +294,20 @@ class SettingsDialog(QDialog):
         self._ld_k2_spin.setSingleStep(0.001)
         self._ld_k2_spin.setValue(float(u.get("ld_k2", 0.005)))
         grid.addWidget(self._ld_k2_spin, row, 3)
+        row += 1
+        # 畸变事件窗口（全片级：k1/k2 只随机一次，窗口内出现）
+        self._ldw_prob, self._ldw_lo, self._ldw_hi = self._event_row(
+            grid, row, "畸变窗口(概率/时长s)", u, "ldw", 0.6, 1.5, 4.0)
+        row += 1
+        grid.addWidget(QLabel("畸变窗口次数"), row, 0)
+        self._ldw_clo, self._ldw_chi = QSpinBox(), QSpinBox()
+        for spin in (self._ldw_clo, self._ldw_chi):
+            spin.setRange(0, 10)
+            spin.setSingleStep(1)
+        self._ldw_clo.setValue(int(u.get("ldw_count_min", 1) or 1))
+        self._ldw_chi.setValue(int(u.get("ldw_count_max", 2) or 2))
+        grid.addWidget(self._ldw_clo, row, 1)
+        grid.addWidget(self._ldw_chi, row, 2)
         row += 1
 
         # 非对称裁剪（配置 video.asymmetric_crop，0~0 → 关闭）
@@ -312,6 +334,18 @@ class SettingsDialog(QDialog):
         self._rl_prob.setValue(float(u.get("rl_prob", 0.4)))
         grid.addWidget(self._rl_prob, row, 3)
         row += 1
+        # 倒放/循环片段时长（段内事件长度，0~0 → 用默认）
+        grid.addWidget(QLabel("片段时长(s)"), row, 0)
+        self._rl_len_lo, self._rl_len_hi = QDoubleSpinBox(), QDoubleSpinBox()
+        for spin in (self._rl_len_lo, self._rl_len_hi):
+            spin.setRange(0, 5)
+            spin.setDecimals(2)
+            spin.setSingleStep(0.05)
+        self._rl_len_lo.setValue(float(u.get("rl_len_min", 0.1)))
+        self._rl_len_hi.setValue(float(u.get("rl_len_max", 0.2)))
+        grid.addWidget(self._rl_len_lo, row, 1)
+        grid.addWidget(self._rl_len_hi, row, 2)
+        row += 1
 
         # 周期抽帧（配置 video.frame_drop：复选框 + 间隔）
         self._fd_chk = QCheckBox("启用周期抽帧（每 N 帧随机删 1 帧）")
@@ -328,9 +362,34 @@ class SettingsDialog(QDialog):
         grid.addWidget(self._fd_lo, row, 2)
         grid.addWidget(self._fd_hi, row, 3)
         row += 1
+        # 抽帧事件窗口（只在窗口内抽帧；概率 + 窗口时长）
+        self._fdw_prob, self._fdw_lo, self._fdw_hi = self._event_row(
+            grid, row, "抽帧窗口(概率/时长s)", u, "fdw", 1.0, 2.0, 5.0)
+        row += 1
 
         grid.setColumnStretch(0, 1)
         self._host_lay.addWidget(box)
+
+    def _event_row(self, grid, row, label, u, prefix, d_prob, d_lo, d_hi):
+        """事件窗口通用行：标签@0 + 概率@1 + 窗口时长 min/max@2/3。
+        概率≤0 或时长 0~0 → 该事件关闭（与处理层规则一致）。"""
+        grid.addWidget(QLabel(label), row, 0)
+        prob = QDoubleSpinBox()
+        prob.setRange(0, 1)
+        prob.setDecimals(2)
+        prob.setSingleStep(0.05)
+        prob.setValue(float(u.get(prefix + "_prob", d_prob)))
+        grid.addWidget(prob, row, 1)
+        lo_spin, hi_spin = QDoubleSpinBox(), QDoubleSpinBox()
+        for spin in (lo_spin, hi_spin):
+            spin.setRange(0, 600)
+            spin.setDecimals(1)
+            spin.setSingleStep(0.5)
+        lo_spin.setValue(float(u.get(prefix + "_dur_min", d_lo)))
+        hi_spin.setValue(float(u.get(prefix + "_dur_max", d_hi)))
+        grid.addWidget(lo_spin, row, 2)
+        grid.addWidget(hi_spin, row, 3)
+        return prob, lo_spin, hi_spin
 
     # ── 其他扰动参数（时序/音频/编码）──
     def _build_other_box(self):
@@ -757,6 +816,23 @@ class SettingsDialog(QDialog):
             "fd_enable": self._fd_chk.isChecked(),
             "fd_interval_min": self._fd_lo.value(),
             "fd_interval_max": self._fd_hi.value(),
+            # 事件窗口参数（v8.1 全片预处理 + 分段动态扰动）
+            "rdw_prob": self._rdw_prob.value(),
+            "rdw_dur_min": self._rdw_lo.value(),
+            "rdw_dur_max": self._rdw_hi.value(),
+            "zdw_prob": self._zdw_prob.value(),
+            "zdw_dur_min": self._zdw_lo.value(),
+            "zdw_dur_max": self._zdw_hi.value(),
+            "ldw_prob": self._ldw_prob.value(),
+            "ldw_dur_min": self._ldw_lo.value(),
+            "ldw_dur_max": self._ldw_hi.value(),
+            "ldw_count_min": int(self._ldw_clo.value()),
+            "ldw_count_max": int(self._ldw_chi.value()),
+            "rl_len_min": self._rl_len_lo.value(),
+            "rl_len_max": self._rl_len_hi.value(),
+            "fdw_prob": self._fdw_prob.value(),
+            "fdw_dur_min": self._fdw_lo.value(),
+            "fdw_dur_max": self._fdw_hi.value(),
         }
 
     def get_asym_crop_range(self) -> tuple:

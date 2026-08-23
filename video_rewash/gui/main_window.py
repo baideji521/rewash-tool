@@ -586,6 +586,24 @@ class MainWindow(QMainWindow):
                     )
                     or 200
                 ),
+
+            # ── 事件窗口参数（v8.1 全片预处理 + 分段动态扰动）──
+            "rdw_prob": float(config_get(cfg, "video.rotate_drift.probability", 0.8)),
+            "rdw_dur_min": float(config_get(cfg, "video.rotate_drift.duration.min", 3.0)),
+            "rdw_dur_max": float(config_get(cfg, "video.rotate_drift.duration.max", 8.0)),
+            "zdw_prob": float(config_get(cfg, "video.zoom_drift.probability", 0.8)),
+            "zdw_dur_min": float(config_get(cfg, "video.zoom_drift.duration.min", 3.0)),
+            "zdw_dur_max": float(config_get(cfg, "video.zoom_drift.duration.max", 8.0)),
+            "ldw_prob": float(config_get(cfg, "video.lens_distortion.probability", 0.6)),
+            "ldw_dur_min": float(config_get(cfg, "video.lens_distortion.duration.min", 1.5)),
+            "ldw_dur_max": float(config_get(cfg, "video.lens_distortion.duration.max", 4.0)),
+            "ldw_count_min": int(config_get(cfg, "video.lens_distortion.count.min", 1) or 1),
+            "ldw_count_max": int(config_get(cfg, "video.lens_distortion.count.max", 2) or 2),
+            "rl_len_min": float(config_get(cfg, "video.reverse_loop.event_length.min", 0.1)),
+            "rl_len_max": float(config_get(cfg, "video.reverse_loop.event_length.max", 0.2)),
+            "fdw_prob": float(config_get(cfg, "video.frame_drop.probability", 1.0)),
+            "fdw_dur_min": float(config_get(cfg, "video.frame_drop.duration.min", 2.0)),
+            "fdw_dur_max": float(config_get(cfg, "video.frame_drop.duration.max", 5.0)),
         }
 
         # ----------------------------------------------------
@@ -1592,6 +1610,21 @@ class MainWindow(QMainWindow):
         ld["enable"] = True  # GUI 在调即启用；关闭 = k1/k2 置 0（下游自动跳过）
         ld["k1_range"] = float(u.get("ld_k1", 0.02))
         ld["k2_range"] = float(u.get("ld_k2", 0.005))
+        ld["probability"] = float(u.get("ldw_prob", 0.6))
+        ld.setdefault("duration", {})["min"] = float(u.get("ldw_dur_min", 1.5))
+        ld["duration"]["max"] = float(u.get("ldw_dur_max", 4.0))
+        ld.setdefault("count", {})["min"] = int(u.get("ldw_count_min", 1) or 1)
+        ld["count"]["max"] = int(u.get("ldw_count_max", 2) or 2)
+
+        rd = vid.setdefault("rotate_drift", {})
+        rd["probability"] = float(u.get("rdw_prob", 0.8))
+        rd.setdefault("duration", {})["min"] = float(u.get("rdw_dur_min", 3.0))
+        rd["duration"]["max"] = float(u.get("rdw_dur_max", 8.0))
+
+        zd = vid.setdefault("zoom_drift", {})
+        zd["probability"] = float(u.get("zdw_prob", 0.8))
+        zd.setdefault("duration", {})["min"] = float(u.get("zdw_dur_min", 3.0))
+        zd["duration"]["max"] = float(u.get("zdw_dur_max", 8.0))
 
         ac = vid.setdefault("asymmetric_crop", {})
         ac["enable"] = True  # 同上；0~0 时采样值全 0，下游自然不裁剪
@@ -1601,6 +1634,8 @@ class MainWindow(QMainWindow):
         rl = vid.setdefault("reverse_loop", {})
         rl["enable"] = bool(u.get("rl_enable", True))
         rl["probability"] = float(u.get("rl_prob", 0.4))
+        rl.setdefault("event_length", {})["min"] = float(u.get("rl_len_min", 0.1))
+        rl["event_length"]["max"] = float(u.get("rl_len_max", 0.2))
 
         fd = vid.setdefault("frame_drop", {})
         fd["enable"] = bool(u.get("fd_enable", True))
@@ -1610,6 +1645,9 @@ class MainWindow(QMainWindow):
         fd["interval"]["max"] = int(
             u.get("fd_interval_max", 200) or 200
         )
+        fd["probability"] = float(u.get("fdw_prob", 1.0))
+        fd.setdefault("duration", {})["min"] = float(u.get("fdw_dur_min", 2.0))
+        fd["duration"]["max"] = float(u.get("fdw_dur_max", 5.0))
 
         STORE.save()
 

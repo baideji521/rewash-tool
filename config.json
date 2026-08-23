@@ -3,7 +3,7 @@
     "segment_count": 6,
     "output_dir": "C:\\Users\\Administrator\\Desktop\\video-rewash-tool-main\\output_videos",
     "input_dir": "C:/Users/Administrator/Desktop/下载/downloads/新建文件夹",
-    "last_used_preset": "自定义调节_标准-优化",
+    "last_used_preset": "标准-自定义",
     "switches": {
         "normalize": true,
         "quality_check": true
@@ -45,18 +45,54 @@
         },
         "lens_distortion": {
             "enable": true,
-            "k1_range": 0.02,
-            "k2_range": 0.005
+            "k1_range": 0.001,
+            "k2_range": 0.007,
+            "probability": 0.6,
+            "duration": {
+                "min": 1.5,
+                "max": 4.0
+            },
+            "count": {
+                "min": 1,
+                "max": 2
+            }
+        },
+        "rotate_drift": {
+            "probability": 0.8,
+            "duration": {
+                "min": 3.0,
+                "max": 8.0
+            }
+        },
+        "zoom_drift": {
+            "probability": 0.8,
+            "duration": {
+                "min": 3.0,
+                "max": 8.0
+            },
+            "pause": {
+                "min": 1.0,
+                "max": 4.0
+            }
         },
         "reverse_loop": {
-            "enable": true,
-            "probability": 0.4
+            "enable": false,
+            "probability": 0.4,
+            "event_length": {
+                "min": 0.1,
+                "max": 0.2
+            }
         },
         "frame_drop": {
             "enable": true,
+            "probability": 0.7,
             "interval": {
-                "min": 100,
-                "max": 200
+                "min": 10,
+                "max": 25
+            },
+            "duration": {
+                "min": 2.0,
+                "max": 5.0
             }
         },
         "black_crop": {

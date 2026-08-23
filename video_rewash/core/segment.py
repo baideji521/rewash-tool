@@ -13,14 +13,16 @@ Bug#3 修正：废弃 concat demuxer + stream-copy 拼接
 import os
 import random
 
-from .randomizer import generate_snapshot
+from .randomizer import generate_snapshot, GLOBAL_PARAM_KEYS, plan_lens_events, generate_segment_plan
 from .ffmpeg_runner import run_ffmpeg, probe_media, STOP_EVENT
 from .config import config_get, config_enabled
 from .normalize import get_target_spec
-from ..video.video_processor import process_clip, build_temporal_pre
-from ..video.filters import (spec_encode_args, build_spatial_chain,
-                             build_geq_filter, build_audio_filter,
-                             build_frame_dup_complex)
+from ..video.video_processor import process_clip
+from ..video.filters import (spec_encode_args, build_geom_chain,
+                             build_color_chain, build_lens_filter,
+                             build_lens_enable_expr,
+                             build_audio_filter)
+from ._graph import build_segment_branch, build_segment_audio, rl_extra_seconds
 
 
 def decide_segment_count(duration: float) -> int:
@@ -55,12 +57,14 @@ def make_equal_cuts(duration: float, n: int) -> list:
 
 
 def _child_snapshot(base_snap: dict, preset: dict, config: dict, seg_idx: int) -> dict:
-    """每段独立快照：重新随机，但色彩参数继承主快照（段间色调连续）"""
+    """每段独立快照：B/C 层（微旋/推镜/抽帧/倒放/变速等）重新随机，
+    A 层全片级参数（颜色/构图/缩放/畸变系数）继承主快照，
+    整条视频只随机一次，不随分段重新随机。"""
     seed = base_snap.get("seed", 0) + seg_idx * 7919
     child = generate_snapshot(preset, config, seed=seed)
     cp = child.get("params", {})
     bp = base_snap.get("params", {})
-    for key in ("brightness", "contrast", "saturation", "hue", "channel_mix", "noise"):
+    for key in GLOBAL_PARAM_KEYS:
         if key in bp:
             cp[key] = bp[key]
     return child
@@ -86,8 +90,32 @@ def process_single_pass(input_path, output_path, base_snap, config,
     do_norm = norm_spec is not None
     eff_fps = float(norm_spec.get("fps", fps)) if norm_spec else fps
     n = len(planned)
+    duration = float(media_info.get("duration", 0.0) or 0.0)
 
-    v_parts, a_parts, v_lbls, a_lbls = [], [], [], []
+    fc_parts, v_lbls, a_lbls = [], [], []
+
+    # ══ A 层全片公共链（整条视频只算一遍）：降帧 → 几何 → 颜色 → 畸变事件窗口 ══
+    # fps 降档放最前：重滤镜（缩放/畸变/颜色）按目标帧率计算，少算一半帧
+    bp = base_snap.get("params", {})
+    geom, tw, th = build_geom_chain(base_snap, width, height,
+                                    norm_spec=norm_spec, crop_rect=crop_rect)
+    common = (f"fps={eff_fps:.3f}," if eff_fps + 1e-6 < fps else "") + geom
+    color = build_color_chain(base_snap, config)
+    if color:
+        common += "," + color
+    lens_events = plan_lens_events(base_snap, config, duration)
+    lens = build_lens_filter(bp, build_lens_enable_expr(lens_events))
+    if lens:
+        common += "," + lens
+    fc_parts.append(f"[0:v]{common}[gbase]")
+    if lens_events:
+        log_fn(f"镜头畸变事件×{len(lens_events)}: "
+               + ", ".join(f"{a:.1f}~{b:.1f}s" for a, b in lens_events))
+    if n > 1:
+        fc_parts.append("[gbase]split=" + str(n) +
+                        "".join(f"[g{i}]" for i in range(n)))
+
+    # ══ 每段分支（B 层参数 + C 层事件窗口）══
     exp_dur = 0.0
     for i, (seg_start, seg_end, snap) in enumerate(planned):
         seg_len = seg_end - seg_start
@@ -97,74 +125,36 @@ def process_single_pass(input_path, output_path, base_snap, config,
         av = float(p.get("av_offset", 0.0) or 0.0)
         t0 = max(0.0, seg_start - av)
         t1 = max(t0 + 0.05, seg_end - av)
+        plan = generate_segment_plan(snap, config, i, seg_len / speed)
+        exp_dur += rl_extra_seconds(plan, speed)
 
-        # 视频支路：时序前置(降帧/抽帧/变速) + 空间/颜色/纹理 + 标准化 + geq
-        pre = build_temporal_pre(snap, config, seg_len, fps, eff_fps, norm_spec)
-        vf = build_spatial_chain(snap, width, height, eff_fps,
-                                 norm_spec=norm_spec, crop_rect=crop_rect,
-                                 config=config)
-        vf = (",".join(pre) + "," if pre else "") + vf
-        if norm_spec:
-            tw = int(norm_spec.get("width", 1280))
-            th = int(norm_spec.get("height", 720))
-            tw, th = tw - tw % 2, th - th % 2
-            # setpts 规整化：zoompan(d=1) 输出时间戳不规则，直接接下游
-            # fps 会触发病态缓冲（实测 >120s）；先对齐目标帧率网格，
-            # fps 变为零成本直通（实测同图 3.6s）
-            nf = norm_spec.get("fps", 30)
-            vf += (f",setpts=N/{nf}/TB,fps={nf},"
-                   f"format={norm_spec.get('pix_fmt', 'yuv420p')},setsar=1")
-            geq = build_geq_filter(snap, tw, th)
-            if geq:
-                vf += "," + geq
-        else:
-            # 无标准化：各段 scale 独立 → 拼前统一回源分辨率/重置 SAR（与合并遍同语义）
-            w2, h2 = width - width % 2, height - height % 2
-            if w2 > 0 and h2 > 0:
-                vf += f",scale={w2}:{h2}:flags=bicubic"
-            vf += ",setsar=1,format=yuv420p"
-        v_parts.append(
-            f"[0:v]trim=start={t0:.3f}:end={t1:.3f},"
-            f"setpts=PTS-STARTPTS,{vf}[vm{i}]")
-        cur_v = f"[vm{i}]"
-        # 重复帧插入（段级复杂图，标签加后缀防碰撞）
-        if int(p.get("frame_dup", 0)) > 0 and seg_len > 1.0:
-            dup_fc, _ = build_frame_dup_complex(snap, seg_len / speed, f"vm{i}")
-            if dup_fc:
-                for a_, b_ in (("[d1]", f"[d1_{i}]"), ("[d2]", f"[d2_{i}]"),
-                               ("[v1]", f"[fv1_{i}]"), ("[v2]", f"[fv2_{i}]"),
-                               ("[vout]", f"[v{i}]")):
-                    dup_fc = dup_fc.replace(a_, b_)
-                v_parts.append(dup_fc)
-                cur_v = f"[v{i}]"
-        v_lbls.append(cur_v)
+        sfx = f"_{i}"
+        src = f"[g{i}]" if n > 1 else "[gbase]"
+        # 视频：trim → (rl/fdrop/speed/zoom/rotate/norm/fdup 事件链)
+        fc_parts.append(f"{src}trim=start={t0:.3f}:end={t1:.3f},"
+                        f"setpts=PTS-STARTPTS[vt{i}]")
+        v_parts, v_out = build_segment_branch(
+            f"[vt{i}]", snap, plan, config, i, seg_len, speed,
+            eff_fps, norm_spec, tw, th, suffix=sfx)
+        fc_parts.extend(v_parts)
+        v_lbls.append(v_out)
 
-        # 音频支路：atrim + 段独立音频滤镜链（变速/变调/EQ/高低通/淡入）
+        # 音频：atrim → rl 同切点 → 段独立音频滤镜链 → 混噪
         if has_audio:
-            af = build_audio_filter(snap)
-            a_chain = (f"[0:a]atrim=start={t0:.3f}:end={t1:.3f},"
-                       f"asetpts=PTS-STARTPTS" + (f",{af}" if af else ""))
-            noise_db = p.get("audio_noise_db")
-            if noise_db:
-                # 激进档极低音量粉噪混音（与旧方案 amix 参数一致）
-                amp = 10 ** (float(noise_db) / 20)
-                a_parts.append(
-                    f"{a_chain}[av{i}];"
-                    f"anoisesrc=c=pink:a={amp:.7f}[an{i}];"
-                    f"[av{i}][an{i}]amix=inputs=2:duration=first"
-                    f":dropout_transition=0[a{i}]")
-            else:
-                a_parts.append(f"{a_chain}[a{i}]")
-            a_lbls.append(f"[a{i}]")
+            fc_parts.append(f"[0:a]atrim=start={t0:.3f}:end={t1:.3f}[at_in{i}]")
+            a_parts, a_out = build_segment_audio(
+                f"[at_in{i}]", snap, plan, seg_len, speed, suffix=sfx)
+            fc_parts.extend(a_parts)
+            a_lbls.append(a_out)
 
     if has_audio:
         cat_in = "".join(f"{v_lbls[i]}{a_lbls[i]}" for i in range(n))
-        fc = ";".join(v_parts + a_parts) + \
+        fc = ";".join(fc_parts) + \
              f";{cat_in}concat=n={n}:v=1:a=1[vout][aout]"
         maps = ["-map", "[vout]", "-map", "[aout]"]
     else:
         cat_in = "".join(v_lbls)
-        fc = ";".join(v_parts) + f";{cat_in}concat=n={n}:v=1:a=0[vout]"
+        fc = ";".join(fc_parts) + f";{cat_in}concat=n={n}:v=1:a=0[vout]"
         maps = ["-map", "[vout]"]
 
     # 音频编码参数（与 build_audio_args 同规则：seed+17 随机码率）
@@ -316,7 +306,7 @@ def process_segmented(input_path, output_path, base_snap, preset, config,
                 use_nvenc=use_nvenc, log_fn=log_fn,
                 ss=seg_start, in_duration=seg_len, progress_cb=seg_cb,
                 target_kbps=target_kbps, norm_spec=seg_norm_spec,
-                crop_rect=crop_rect)
+                crop_rect=crop_rect, seg_idx=i)
             if not success:
                 return False, f"分段{i + 1}处理失败: {err}", snaps
             seg_files.append(seg_path)

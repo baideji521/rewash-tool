@@ -54,3 +54,9 @@ ffmpeg/doc/ffprobe-all.html
 # 运行时日志与工具缓存
 logs/
 .qoder/
+
+# 调试/性能测试临时产物（仅根目录下划线前缀，不影响 video_rewash/core/_graph.py）
+/_*.py
+/_*.txt
+/_*.ps1
+/_perf_out/
