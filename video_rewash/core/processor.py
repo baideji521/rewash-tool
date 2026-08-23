@@ -16,7 +16,7 @@ import time
 
 from .ffmpeg_runner import run_ffmpeg, probe_media, STOP_EVENT, detect_black_crop
 from .config import config_get, config_enabled
-from .randomizer import generate_snapshot, snapshot_summary
+from .randomizer import generate_snapshot, snapshot_summary, log_parameter_calibration
 from .segment import process_segmented
 from .normalize import get_target_spec
 from .quality_check import check_output
@@ -187,6 +187,7 @@ def process_one(input_path: str, output_path: str, preset: dict, config: dict,
             log_fn(f"使用预设：{snapshot_summary(snap)}"
                    + (f"  [重试 {attempt_idx + 1}/{fp_retry_max + 1}]"
                       if attempt_idx > 0 else ""))
+            log_parameter_calibration(snap, log_fn)
 
             work_dir = tempfile.mkdtemp(prefix="rewash_work_")
             # FFmpeg 先写 .processing 临时文件，质检+指纹通过后再 rename

@@ -1,0 +1,28 @@
+{
+  "preset": "calibration",
+  "seed": 12345,
+  "params": {
+    "brightness": 15.0,
+    "contrast": 15.0,
+    "saturation": 15.0,
+    "hue": 5.0,
+    "scale": 1.0,
+    "speed": 1.0,
+    "rotate_drift_amp": 1.0,
+    "rotate_drift_period": 10.0,
+    "rotate_drift_speed": 0.02,
+    "rotate_drift_phase": 0.0,
+    "zoom_drift_amp": 0.0,
+    "crf": 23,
+    "gop": 40,
+    "bframes": 2,
+    "audio_atempo": 1.0,
+    "audio_pitch": 0.0,
+    "audio_eq_bands": [],
+    "audio_highpass": 0,
+    "audio_lowpass": 0,
+    "av_offset": 0.0,
+    "trim_head": 0.0,
+    "trim_tail": 0.0
+  }
+}

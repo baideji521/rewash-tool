@@ -201,26 +201,29 @@ def build_zoom_window_complex(src_label: str, zwin: dict, p: dict,
 # ──────────────────────────────────────────────────────────────
 
 def build_rotate_filter(p: dict, enable_expr: str = None) -> str:
-    """动态微旋（正弦角度渐变 + 单向恒速漂移）。
-    单位：amp=最大摆角（°），period=正弦周期（s），speed=单向漂移（°/s，
-    累计角度=speed×t，取值必须极小），phase=初相位（rad）。
-    FFmpeg rotate 角度为弧度，故各项均乘 π/180 换算；公式不再做任何
-    单位变换。enable_expr 非空时仅窗口内生效（rotate 支持 timeline，
-    窗口外零开销）。窗口内时间基准由调用方保证（先 setpts 归零再进窗口）。
-    未启用返回空串。"""
+    """动态微旋：双正弦波叠加（消除线性漂移，保证上限安全）。
+    UI 'speed' 参数重定义为：慢速分量的最大变化率（deg/s）。
+    慢速周期固定为 60.0s。
+    """
     r_amp = float(p.get("rotate_drift_amp", 0.0))
     r_period = max(1.0, float(p.get("rotate_drift_period", 10.0)))
     r_speed = float(p.get("rotate_drift_speed", 0.0))
     r_phase = float(p.get("rotate_drift_phase", 0.0))
-    # 启用阈值只区分 0~0 关闭与启用，不拦截新区间内的合法小值（amp≥0.03°）
-    if not (r_amp > 0.001 or abs(r_speed) > 0.0005):
+    
+    # 慢速漂移分量：周期 60s，振幅 = speed * 60 / (2*PI)
+    t2 = 60.0
+    amp2 = r_speed * t2 / (2 * math.pi)
+    phase2 = r_phase * 0.7  # 错位相位以产生非对称感
+
+    if not (abs(r_amp) > 0.001 or abs(r_speed) > 0.0005):
         return ""
+
     deg2rad = math.pi / 180
-    sin_part = (f"{r_amp:.4f}*{deg2rad:.6f}*sin(2*PI*t/{r_period:.2f}+{r_phase:.4f})"
-                if r_amp > 0.001 else "0")
-    # {:+.4f} 自动携带符号，负速度生成 "-0.0140" 而非 "+-0.0140"
-    spd_part = f"{r_speed:+.4f}*{deg2rad:.6f}*t" if abs(r_speed) > 0.0005 else ""
-    angle_expr = f"({sin_part}{spd_part})"
+    # A1*sin(2pi*t/T1 + p1) + A2*sin(2pi*t/T2 + p2)
+    sin1 = f"{r_amp:.4f}*{deg2rad:.6f}*sin(2*PI*t/{r_period:.2f}+{r_phase:.4f})"
+    sin2 = f"{amp2:.4f}*{deg2rad:.6f}*sin(2*PI*t/{t2:.2f}+{phase2:.4f})"
+    angle_expr = f"({sin1}+{sin2})"
+    
     f = f"rotate={angle_expr}:fillcolor=none"
     if enable_expr:
         f += f":enable='{enable_expr}'"
@@ -505,6 +508,11 @@ def build_audio_filter(snap: dict) -> str:
     fade = float(p.get("audio_fade", 0.0) or 0.0)
     if fade > 0.05:
         filters.append(f"afade=t=in:d={fade:.2f}")
+    av = float(p.get("av_offset", 0.0) or 0.0)
+    if av >= 0.02:
+        filters.append(f"adelay={int(round(av * 1000))}:all=1")
+    elif av <= -0.02:
+        filters += [f"atrim=start={-av:.3f}", "asetpts=PTS-STARTPTS"]
 
     return ",".join(filters)
 

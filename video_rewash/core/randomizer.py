@@ -299,6 +299,65 @@ def snapshot_summary(snap: dict) -> str:
     )
 
 
+def log_parameter_calibration(snap: dict, log_fn):
+    """输出详细参数校准日志 [PARAM] (满足全参数校准任务要求)"""
+    if not log_fn:
+        return
+    p = snap.get("params", {})
+    log_fn("[PARAM] 参数语义校准明细:")
+
+    # 1. 颜色
+    for key in ("brightness", "contrast", "saturation"):
+        val = float(p.get(key, 0.0))
+        ffmpeg_val = val / 100.0 if key == "brightness" else 1.0 + val / 100.0
+        log_fn(f"{key}:\n  configured={abs(val)}%\n  randomized={val:+.1f}%\n  ffmpeg={ffmpeg_val:.4f}")
+
+    hue = float(p.get("hue", 0.0))
+    log_fn(f"hue:\n  configured={abs(hue)}°\n  randomized={hue:+.2f}°\n  ffmpeg=h={hue:.2f}")
+
+    # 2. 几何
+    scale = float(p.get("scale", 1.0))
+    log_fn(f"scale:\n  configured={scale}\n  randomized={scale}\n  ffmpeg={scale}")
+
+    # 3. 时序
+    speed = float(p.get("speed", 1.0))
+    log_fn(f"speed:\n  configured={speed}\n  randomized={speed}\n  ffmpeg=setpts={1.0/speed:.6f}*PTS")
+    log_fn(f"trim:\n  head={p.get('trim_head', 0.0):.3f}s\n  tail={p.get('trim_tail', 0.0):.3f}s")
+    
+    fd_count = p.get("frame_dup", 0)
+    if fd_count > 0:
+        log_fn(f"frame_dup:\n  count={fd_count} frames\n  pos={p.get('frame_dup_pos', 0.5):.2f}")
+
+    # 4. 动态扰动
+    z_amp = float(p.get("zoom_drift_amp", 0.0))
+    if z_amp > 0.002:
+        log_fn(f"zoom_drift:\n  configured_amp={z_amp}\n  ffmpeg_z=1+{z_amp:.4f}*mod(...)")
+
+    r_amp = float(p.get("rotate_drift_amp", 0.0))
+    r_spd = float(p.get("rotate_drift_speed", 0.0))
+    if r_amp > 0.001 or abs(r_spd) > 0.0005:
+        deg2rad = math.pi / 180
+        # 慢速漂移分量振幅计算
+        t2 = 60.0
+        amp2 = r_spd * t2 / (2 * math.pi)
+        log_fn(f"rotate_drift (Dual-Sine Model):\n  amp1={r_amp}° (fast)\n  amp2={amp2:.4f}° (slow, speed={r_spd:+.4f}°/s)\n  limit={r_amp+abs(amp2):.3f}°\n  ffmpeg_rad=({r_amp:.4f}*deg2rad*sin1 + {amp2:.4f}*deg2rad*sin2)")
+
+    # 5. 音频
+    a_pitch = float(p.get("audio_pitch", 0.0))
+    if abs(a_pitch) > 0.01:
+        rate = 2.0 ** (a_pitch / 12.0)
+        log_fn(f"audio_pitch:\n  configured={a_pitch} semitones\n  ffmpeg_rate={rate:.6f} (asetrate={int(44100*rate)})")
+
+    av = float(p.get("av_offset", 0.0))
+    if abs(av) > 0.01:
+        log_fn(f"av_offset:\n  configured={av}s\n  ffmpeg={'adelay=' + str(int(av*1000)) if av > 0 else 'atrim=start=' + str(-av)}")
+
+    # 6. 编码
+    crf = p.get("crf")
+    gop = p.get("gop")
+    log_fn(f"encode:\n  crf/qp={crf}\n  gop={gop} frames")
+
+
 # ────────────────────────────────────────────────────────────
 #  时间事件规划（C 层）：全片/分段的时间窗口生成，仅依赖快照 seed，
 #  确定性可复现；所有新字段都有默认值，旧配置缺字段不崩溃。

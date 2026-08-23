@@ -26,10 +26,8 @@ def build_audio_args(snap: dict, has_audio: bool,
     p = snap.get("params", {})
     input_pre = []
 
-    # 音画偏移（观感风险项：仅标准/激进档小幅启用，输出过质检）
-    av = float(p.get("av_offset", 0.0) or 0.0)
-    if abs(av) >= 0.02:
-        input_pre += ["-itsoffset", f"{av:.3f}"]
+    # 音画偏移必须只作用于音频流；输入级 -itsoffset 会同移该输入的
+    # 音视频流，不能产生相对偏移。具体滤镜在 build_audio_filter 中附加。
 
     out_args = []
     audio_mixed = False

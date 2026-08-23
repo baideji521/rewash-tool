@@ -247,9 +247,13 @@ def process_segmented(input_path, output_path, base_snap, preset, config,
     if n < 2:
         return None, "too short", []  # None 表示调用方走整文件流程
 
-    # 按视频时长均分：duration/n（例：60s 分 5 段 = 每段 12s）；
-    # 安全分段由 clamp_segment_count 保证每段不至于过短
-    cuts = make_equal_cuts(duration, n)
+    # 按有效视频时长（排除 trim）均分切点
+    p = base_snap.get("params", {})
+    trim_head = float(p.get("trim_head", 0.0))
+    trim_tail = float(p.get("trim_tail", 0.0))
+    effective_duration = max(2.0, duration - trim_head - trim_tail)
+    
+    cuts = make_equal_cuts(effective_duration, n)
 
     # 提速：标准化开启时各段直接按目标规格处理（如 60→30fps 少算一半帧），
     # 合并时的 scale/pad/fps 对已达标的段是空操作
@@ -260,7 +264,7 @@ def process_segmented(input_path, output_path, base_snap, preset, config,
     # 各段独立快照先生成（与降级路径同 seed 公式，参数完全一致）
     planned = []
     for i in range(n):
-        seg_start, seg_end = cuts[i], cuts[i + 1]
+        seg_start, seg_end = trim_head + cuts[i], trim_head + cuts[i + 1]
         if seg_end - seg_start < 0.8:
             continue
         planned.append((seg_start, seg_end,
