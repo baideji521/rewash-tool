@@ -287,3 +287,27 @@ git diff --stat 08062c6 a828758 → 仅 PARAMETER_CALIBRATION_REPORT_V2.md（+50
 - 仍为 `INEFFECTIVE`（6）：`mask_drift` / `channel_mix` / `noise`（配置默认关，开启后实测生效）、`audio_noise_db`、`_fps` 冗余字段、`crf<24` 钳制（B8，设计取舍）、`frame_drop_on` 死参数 —— 其中前三项按「默认配置下无效」计一行、`frame_drop_on` 与 B8 各占一行
 - 仍为 `EVIDENCE_INSUFFICIENT`（5）：`effective_duration` 的 `max(2.0)` 短素材边界、`rl_pos_rel` 分布、`switches.*`/`fingerprint.*` 全组合、`version_count` 多版本、AAC 随机码率区间分布
 - 复测入口新增：`param_forensics_v5.py visual|encode|audio|av_offset|fallback`
+
+## 状态刷新（V6 无人值守阶段完成后）
+
+参数级计数**沿用上一节**（PASS 86 / BUG 0 / INEFFECTIVE 6 / EVIDENCE_INSUFFICIENT 5 = 97）：
+本阶段未新增参数条目，新增的是**组合 / 边界 / 顺序 / 坐标空间**维度的证据，
+以及由此暴露的 4 个产品 Bug（已全部修复并复验）。
+
+- 新增常驻取证入口：`param_forensics_v6.py combo|boundary|dead|order|dist|switches|zoomacc|wincoord`
+- 一键完整回归：`python tests/unattended.py`（15 套件；加 `quick` 只跑快套件）
+- 本阶段 Bug：B22 B23 B24（推镜窗口帧数，同根因）、B25（微旋窗口坐标）
+  → 全部 FIXED；测试基础设施 B21 B34 亦 FIXED
+- 受影响参数的判据修订：
+  - `zoom_drift_amp`：由「视觉生效即 PASS」细化为「**且**不得改变段帧数/时长」
+    —— 推镜窗口现位于变速之前，栅格 = 源帧率（36 条证据）
+  - `rotate_drift_*`：窗口位置判据补充「filtergraph 的 `between(t,…)`
+    必须等于 plan 坐标原值」（`wincoord` W3 常驻断言）
+  - `speed`：新增与推镜/微旋组合时的时间轴守恒证据（8 条）
+- 仍为 `INEFFECTIVE`（6）/ `EVIDENCE_INSUFFICIENT`（5）的项与上一节一致，未变。
+- 连续两轮完整回归干净：`R-000003`、`R-000004`（各 15 套件全 PASS）。
+- 权威机器可读状态：`tests/evidence/index.json`、`tests/evidence/bug_queue.json`；
+  可读索引 `tests/evidence/EVIDENCE_INDEX.md`、`tests/evidence/BUG_QUEUE.md`、
+  `PARAMETER_MASTER_AUDIT.md`；结论见 `PARAMETER_CALIBRATION_REPORT_V6.md`
+  与 `PARAMETER_BUG_REPORT_V5.md`。
+
