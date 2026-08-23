@@ -2,16 +2,17 @@
 """gui.settings_dialog — 设置对话框（v7.2 参数分类重整）
 
 页1 去重参数：
-    全局项（影响整个处理任务）：视频并发/版本数/分段数/指纹检测/
-    NVENC 编码档位/质量检测
     局部项 · 视觉扰动（影响单个视频片段的画面变化）：微旋/推镜/
     镜头畸变/非对称裁剪/亮度/对比度/饱和度/色相/倒放循环/周期抽帧
     其他扰动参数（时序/音频/编码）：缩放/裁剪/变速/重复帧/音频微调/
     CRF/GOP（噪点与通道混合为性能减法项，不进 GUI）
 
-页2 流程与输出：输出标准化开关 + 标准化规格（比例/分辨率/帧率/编码/码率）
+页2 高级选项：
+    全局项（影响整个处理任务）：视频并发/版本数/分段数/指纹检测/
+    NVENC 编码档位/质量检测 + 输出标准化开关与规格（比例/分辨率/
+    帧率/编码/码率）
 
-页3 预设管理：重命名 / 删除 / 导出为 JSON / 从 JSON 导入
+页3 预设管理：预设选择 + 重命名 / 删除 / 导出为 JSON / 从 JSON 导入
 
 按钮语义：
 - 确定：预设 + 全部设置应用到主界面（预设参数为临时微调）
@@ -111,7 +112,7 @@ class SettingsDialog(QDialog):
         root = QVBoxLayout(self)
         tabs = QTabWidget()
         tabs.addTab(self._build_tab_params(), "去重参数")
-        tabs.addTab(self._build_tab_flow(), "流程与输出")
+        tabs.addTab(self._build_tab_advanced(), "高级选项")
         tabs.addTab(self._build_tab_manage(), "预设管理")
         root.addWidget(tabs, 1)
 
@@ -135,31 +136,15 @@ class SettingsDialog(QDialog):
         root.addLayout(btns)
 
     def _build_tab_params(self) -> QWidget:
+        """去重参数页：仅扰动参数（预设切换在「预设管理」页）"""
         tab = QWidget()
         outer = QVBoxLayout(tab)
-
-        # 预设选择
-        pl = QHBoxLayout()
-        pl.addWidget(QLabel("预设:"))
-        self.preset_combo = QComboBox()
-        for key, label, builtin in preset_mod.list_presets():
-            mark = "📌 " if builtin else "👤 "
-            self.preset_combo.addItem(f"{mark}{label}", key)
-        cur = self._preset.get("name", "standard")
-        for i in range(self.preset_combo.count()):
-            if self.preset_combo.itemData(i) == cur:
-                self.preset_combo.setCurrentIndex(i)
-                break
-        self.preset_combo.currentIndexChanged.connect(self._on_preset_switch)
-        pl.addWidget(self.preset_combo, 1)
-        outer.addLayout(pl)
 
         # 参数区（可滚动）
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         self._host = QWidget()
         self._host_lay = QVBoxLayout(self._host)
-        self._build_global_box()
         self._build_visual_box()
         self._build_other_box()
         self._host_lay.addStretch()
@@ -167,7 +152,7 @@ class SettingsDialog(QDialog):
         outer.addWidget(scroll, 1)
         return tab
 
-    # ── 全局项（影响整个处理任务）──
+    # ── 全局项（影响整个处理任务，位于高级选项页）──
     def _build_global_box(self):
         u = self._ui_in
         box = QGroupBox("全局项（影响整个处理任务）")
@@ -237,7 +222,7 @@ class SettingsDialog(QDialog):
 
         g.setColumnStretch(1, 0)
         g.setColumnStretch(3, 1)
-        self._host_lay.addWidget(box)
+        return box
 
     def _on_fp_toggled(self, on: bool):
         for w in (self.fp_thresh_spin, self.fp_frames_spin, self.fp_retry_spin):
@@ -385,25 +370,26 @@ class SettingsDialog(QDialog):
         self._host_lay.addWidget(box)
 
     def _rebuild_param_area(self):
-        """清空三个分组框后重建（切换/恢复预设时，局部项/其他项随预设刷新）。
-        全局项与配置级扰动不随预设变化：先把当前值固化回 _ui_in，
-        重建时自然保留用户已编辑的内容。"""
+        """清空扰动分组框后重建（切换/恢复预设时，局部项/其他项随预设刷新）。
+        配置级扰动不随预设变化：先把当前值固化回 _ui_in，
+        重建时自然保留用户已编辑的内容；全局项在高级选项页，不受影响。"""
         self._ui_in.update(self.get_ui_state())
         while self._host_lay.count() > 0:
             item = self._host_lay.takeAt(0)
             w = item.widget()
             if w is not None:
                 w.deleteLater()
-        self._build_global_box()
         self._build_visual_box()
         self._build_other_box()
         self._host_lay.addStretch()
 
-    def _build_tab_flow(self) -> QWidget:
+    def _build_tab_advanced(self) -> QWidget:
+        """高级选项页：全局项 + 输出标准化规格"""
         tab = QWidget()
         lay = QVBoxLayout(tab)
         u = self._ui_in
 
+        lay.addWidget(self._build_global_box())
         norm_box = QGroupBox("输出标准化规格")
         nl = QGridLayout(norm_box)
         self.chk_norm = QCheckBox("输出标准化")
@@ -456,14 +442,27 @@ class SettingsDialog(QDialog):
         return tab
 
     def _build_tab_manage(self) -> QWidget:
-        """预设管理：重命名/删除/导出/导入 + 当前预设显示"""
+        """预设管理：预设选择 + 重命名/删除/导出/导入"""
         tab = QWidget()
         lay = QVBoxLayout(tab)
-        self.cur_preset_label = QLabel("当前预设: —")
-        self.cur_preset_label.setStyleSheet("font-weight:bold")
-        self._update_cur_label()
-        lay.addWidget(self.cur_preset_label)
-        tip = QLabel("选中自定义预设后可重命名/删除/导出为 JSON；也可从 JSON 文件导入预设")
+
+        # 预设选择（切换后去重参数页的范围随之刷新）
+        pl = QHBoxLayout()
+        pl.addWidget(QLabel("当前预设:"))
+        self.preset_combo = QComboBox()
+        for key, label, builtin in preset_mod.list_presets():
+            mark = "📌 " if builtin else "👤 "
+            self.preset_combo.addItem(f"{mark}{label}", key)
+        cur = self._preset.get("name", "standard")
+        for i in range(self.preset_combo.count()):
+            if self.preset_combo.itemData(i) == cur:
+                self.preset_combo.setCurrentIndex(i)
+                break
+        self.preset_combo.currentIndexChanged.connect(self._on_preset_switch)
+        pl.addWidget(self.preset_combo, 1)
+        lay.addLayout(pl)
+
+        tip = QLabel("切换预设后去重参数页的范围随之刷新；选中列表项可重命名/删除/导出，也可导入 JSON 预设")
         tip.setStyleSheet("color:#888;font-size:11px")
         lay.addWidget(tip)
         self.mgr_list = QListWidget()
@@ -486,12 +485,6 @@ class SettingsDialog(QDialog):
         btns.addStretch()
         lay.addLayout(btns)
         return tab
-
-    def _update_cur_label(self):
-        if not hasattr(self, "cur_preset_label"):
-            return
-        txt = self.preset_combo.currentText() if hasattr(self, "preset_combo") else "—"
-        self.cur_preset_label.setText(f"当前预设: {txt or '—'}")
 
     def _reload_mgr_list(self, select_key=None):
         self.mgr_list.clear()
@@ -635,7 +628,6 @@ class SettingsDialog(QDialog):
                 self.preset_combo.setCurrentIndex(i)
                 break
         self.preset_combo.blockSignals(False)
-        self._update_cur_label()
 
     def _refresh_res_combo(self, cur_w, cur_h):
         """按当前比例刷新分辨率下拉，选中与当前宽高最接近的项。
@@ -679,7 +671,6 @@ class SettingsDialog(QDialog):
             return
         self._preset = preset_mod.get_preset(key)
         self._rebuild_param_area()
-        self._update_cur_label()
 
     def _restore_current(self):
         """丢弃未保存微调，重新载入当前所选预设的参数"""
