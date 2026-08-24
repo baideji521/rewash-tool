@@ -3,7 +3,7 @@
     "segment_count": 6,
     "output_dir": "C:\\Users\\Administrator\\Desktop\\video-rewash-tool-main\\output_videos",
     "input_dir": "C:/Users/Administrator/Desktop/下载/downloads/新建文件夹",
-    "last_used_preset": "standard",
+    "last_used_preset": "aggressive",
     "switches": {
         "normalize": true,
         "quality_check": true
@@ -65,9 +65,9 @@
             }
         },
         "zoom_drift": {
-            "probability": 0.8,
+            "probability": 0.5,
             "duration": {
-                "min": 3.0,
+                "min": 0.5,
                 "max": 8.0
             },
             "pause": {
@@ -182,12 +182,84 @@
                 "period": 3.5
             },
             "rotate_drift": {
-                "amp_min": 0.05,
-                "amp_max": 0.1,
+                "amp_min": 0.5,
+                "amp_max": 1.5,
                 "period_min": 8.0,
                 "period_max": 15.0,
                 "speed_min": 0.01,
                 "speed_max": 0.02
+            }
+        },
+        "aggressive": {
+            "scale": {
+                "min": 0.95,
+                "max": 1.12
+            },
+            "brightness": {
+                "min": 5.0,
+                "max": 10.0
+            },
+            "contrast": {
+                "min": 5.0,
+                "max": 10.0
+            },
+            "saturation": {
+                "min": 5.0,
+                "max": 10.0
+            },
+            "hue": {
+                "min": 5.0,
+                "max": 13.0
+            },
+            "speed": {
+                "min": 0.95,
+                "max": 1.06
+            },
+            "frame_dup": {
+                "min": 2.0,
+                "max": 4.0
+            },
+            "trim": {
+                "min": 0.8,
+                "max": 1.8
+            },
+            "audio_speed": {
+                "min": 0.985,
+                "max": 1.015
+            },
+            "audio_pitch": {
+                "min": 1.0,
+                "max": 2.0
+            },
+            "audio_eq": {
+                "min": 2.0,
+                "max": 3.5
+            },
+            "av_offset": {
+                "enable": true,
+                "min": 0.12,
+                "max": 0.22
+            },
+            "crf": {
+                "min": 18.0,
+                "max": 28.0
+            },
+            "gop": {
+                "min": 20.0,
+                "max": 70.0
+            },
+            "zoom_drift": {
+                "amp_min": 0.02,
+                "amp_max": 0.09,
+                "period": 2.5
+            },
+            "rotate_drift": {
+                "amp_min": 0.08,
+                "amp_max": 0.15,
+                "period_min": 6.0,
+                "period_max": 12.0,
+                "speed_min": 0.015,
+                "speed_max": 0.03
             }
         }
     }

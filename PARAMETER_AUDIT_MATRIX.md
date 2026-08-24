@@ -337,3 +337,52 @@ git diff --stat 08062c6 a828758 → 仅 PARAMETER_CALIBRATION_REPORT_V2.md（+50
   残差在 `_merge_reencode` 合并遍）；C 整文件 325（构成不同，按各自台账校验）
 - 详细结论见 `PARAMETER_CALIBRATION_REPORT_V7.md` 与 `PARAMETER_BUG_REPORT_V6.md`。
 
+## 状态刷新（V8 全量复核审计）
+
+本阶段的口径是"**重新验证**而不是相信历史报告"：历史 PASS 一律回到源码现状 +
+重新抽样实测。结论是——**又抓出两个真实产品缺陷**，且都曾被"看起来通过"的
+用例掩盖。
+
+### 参数级修订（覆盖上文旧行）
+
+- `zoom_drift_amp` / `zoom_drift_period` / `zoom_drift_dir`
+  （上文 §B 表格里旧记为 `EVIDENCE_INSUFFICIENT`，已过时）
+  → **PASS**：判据升级为"窗口开启后帧数必须等于 `zoom.off` 基线且等于台账预测，
+  且 `sum(切段三片帧数) == 输入帧数`"。
+  实测 7 组**非帧对齐**窗口 × speed{1.00, 1.03, 0.97} = 24 例全 OK
+  （`test_zoom_window_frame_conservation`），修复前 15 组里 9 组 +1 帧（**B55**）。
+- `crop_rect`（黑边检测）/ `video.black_crop`
+  （上文旧记为 `EVIDENCE_INSUFFICIENT`）
+  → **PASS（修复后）**：`detect_black_crop` 曾因"4 个捕获组解包给 5 个名字 +
+  bare except"对任何素材恒返回 `None`，功能从未生效（**B56**，出厂配置是开的）。
+  现判据 = 产品 rect 逐字出现在真实命令里 + 与关闭该开关的对照渲染 SHA 不同。
+- `_fps`（快照冗余字段）：`EVIDENCE_INSUFFICIENT` → **NOT_APPLICABLE**
+  （快照里不存在任何 `*fps` 键 → 命题无被测对象，也无可补证据；
+  帧率活口径由 `sweep/36_normalize_fps` PASS 覆盖）。
+- `frame_drop_on`：保持 **INEFFECTIVE**（生成但渲染链引用 0，真正的门是
+  `video.frame_drop.enable` 与段级 plan）。
+
+### 结构性增补
+
+- 新增 `PATH_COVERAGE_MATRIX.md`（single_pass / fallback / merge_reencode /
+  whole_file / segmented × 参数）与 `COMBINATION_COVERAGE.md`（8 + 19 组合）。
+- 证据库新增两个**独立**生产路径标签：`fallback`（`paths3/fallback_clips`）与
+  `merge_reencode`（`paths3/merge_reencode`）—— V8 基线时这两条路径在证据库里
+  一条证据都没有。
+- `PARAMETER_MASTER_AUDIT.md` 由"只有实测计数"扩为"静态属性 + 实测统计"：
+  源码赋值点、生成表达式（随机区间/种子）、配置门、进入 FFmpeg 的判据正则、
+  作用域、时间轴/坐标空间、与 speed·fps·trim·分段·事件·路径·编码器的交互、
+  观测方法、路径覆盖（数据源 `tests/param_spec.py`，未核定字段显式写"未核"）。
+- 判定词表新增 `NOT_APPLICABLE`：命题无被测对象且不存在可补证据，
+  与"没测到（EVIDENCE_INSUFFICIENT）"严格区分，不得混入 PASS。
+
+### 本阶段 Bug
+
+- B50~B53 TEST_INFRA_BUG（驱动把脚本自述汇总行当成 BUG 命中）→ FIXED
+- B54 回归（B39 attempt_02 的窗口截断）→ FIXED（attempt_03 帧精确 `-t`）
+- **B55** 产品 P1（推镜窗口切段重复 1 帧）→ FIXED，1/3 次尝试
+- **B56** 产品 P1（黑边裁剪恒定不生效）→ FIXED，1/3 次尝试
+- 详见 `PARAMETER_BUG_REPORT_V7.md` 与
+  `PARAMETER_CALIBRATION_REPORT_V8.md`。
+
+
